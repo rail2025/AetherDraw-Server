@@ -83,7 +83,8 @@ func (h *Hub) run() {
 			h.roomsMux.Unlock()
 			slog.Info("Client registered", "room", client.room, "remoteAddr", client.conn.RemoteAddr())
 
-		case client := <-h.unregister:
+		case <-h.unregister:
+			//  corrected line.
 			// Unregistration logic will be added here.
 		}
 	}
