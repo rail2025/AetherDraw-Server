@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -34,11 +35,11 @@ type Client struct {
 // Room holds the set of clients.
 type Room struct {
 	clients map[*Client]bool
-	// History and other room-specific data will be added back later.
 }
 
 // Hub maintains the set of active clients and broadcasts messages to the correct rooms.
 type Hub struct {
+	serverID   string // A unique ID for this server instance.
 	rooms      map[string]*Room
 	roomsMux   sync.RWMutex
 	broadcast  chan *Message
@@ -54,6 +55,7 @@ var upgrader = websocket.Upgrader{
 
 func newHub() *Hub {
 	return &Hub{
+		serverID:   uuid.New().String(), // Assign a unique ID on startup.
 		broadcast:  make(chan *Message),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
@@ -62,6 +64,7 @@ func newHub() *Hub {
 }
 
 func (h *Hub) run() {
+	slog.Info("Hub is running", "serverID", h.serverID)
 	for {
 		select {
 		case client := <-h.register:
@@ -72,11 +75,11 @@ func (h *Hub) run() {
 					clients: make(map[*Client]bool),
 				}
 				h.rooms[client.room] = room
-				slog.Info("Created new room", "room", client.room)
+				slog.Info("Created new room", "room", client.room, "serverID", h.serverID)
 			}
 			room.clients[client] = true
 			h.roomsMux.Unlock()
-			slog.Info("Client registered", "room", client.room, "remoteAddr", client.conn.RemoteAddr())
+			slog.Info("Client registered", "room", client.room, "serverID", h.serverID, "remoteAddr", client.conn.RemoteAddr())
 
 		case client := <-h.unregister:
 			h.roomsMux.Lock()
@@ -84,7 +87,7 @@ func (h *Hub) run() {
 				if _, ok := room.clients[client]; ok {
 					delete(room.clients, client)
 					close(client.send)
-					slog.Info("Client unregistered", "room", client.room, "remoteAddr", client.conn.RemoteAddr())
+					slog.Info("Client unregistered", "room", client.room, "serverID", h.serverID, "remoteAddr", client.conn.RemoteAddr())
 				}
 			}
 			h.roomsMux.Unlock()
@@ -119,7 +122,7 @@ func (c *Client) readPump() {
 		_, msgData, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				slog.Warn("Unexpected close error", "error", err)
+				slog.Warn("Unexpected close error", "error", err, "serverID", c.hub.serverID)
 			}
 			break
 		}
@@ -157,13 +160,13 @@ func (c *Client) writePump() {
 func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	passphrase := r.URL.Query().Get("passphrase")
 	if passphrase == "" {
-		slog.Warn("Connection attempt without passphrase")
+		slog.Warn("Connection attempt without passphrase", "serverID", hub.serverID)
 		http.Error(w, "Passphrase is required", http.StatusBadRequest)
 		return
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		slog.Error("Failed to upgrade connection", "error", err)
+		slog.Error("Failed to upgrade connection", "error", err, "serverID", hub.serverID)
 		return
 	}
 	client := &Client{
