@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -16,6 +15,7 @@ const (
 	pongWait       = 60 * time.Second
 	pingPeriod     = (pongWait * 9) / 10
 	maxMessageSize = 16 * 1024
+	historyCap     = 5000
 )
 
 type Message struct {
@@ -31,11 +31,12 @@ type Client struct {
 }
 
 type Room struct {
-	clients map[*Client]bool
+	clients    map[*Client]bool
+	history    [][]byte
+	historyMux sync.RWMutex
 }
 
 type Hub struct {
-	serverID   string
 	rooms      map[string]*Room
 	roomsMux   sync.RWMutex
 	broadcast  chan *Message
@@ -49,7 +50,6 @@ var upgrader = websocket.Upgrader{
 
 func newHub() *Hub {
 	return &Hub{
-		serverID:   uuid.New().String(),
 		broadcast:  make(chan *Message),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
@@ -58,20 +58,29 @@ func newHub() *Hub {
 }
 
 func (h *Hub) run() {
-	slog.Info("Hub is running", "serverID", h.serverID)
 	for {
 		select {
 		case client := <-h.register:
 			h.roomsMux.Lock()
 			room, ok := h.rooms[client.room]
 			if !ok {
-				room = &Room{clients: make(map[*Client]bool)}
+				room = &Room{
+					clients: make(map[*Client]bool),
+					history: make([][]byte, 0, historyCap),
+				}
 				h.rooms[client.room] = room
-				slog.Info("Created new room", "room", client.room, "serverID", h.serverID)
+				slog.Info("Created new room", "room", client.room)
 			}
 			room.clients[client] = true
 			h.roomsMux.Unlock()
-			slog.Info("Client registered", "room", client.room, "serverID", h.serverID)
+
+			// Send existing history to the new client
+			room.historyMux.RLock()
+			for _, msg := range room.history {
+				client.send <- msg
+			}
+			room.historyMux.RUnlock()
+			slog.Info("Client registered and history sent", "room", client.room)
 
 		case client := <-h.unregister:
 			h.roomsMux.Lock()
@@ -79,29 +88,31 @@ func (h *Hub) run() {
 				if _, ok := room.clients[client]; ok {
 					delete(room.clients, client)
 					close(client.send)
-					slog.Info("Client unregistered", "room", client.room, "serverID", h.serverID)
+					slog.Info("Client unregistered", "room", client.room)
 				}
 			}
 			h.roomsMux.Unlock()
 
 		case message := <-h.broadcast:
-			slog.Info("Hub received message to broadcast", "room", message.room, "serverID", h.serverID, "dataLen", len(message.data))
 			h.roomsMux.RLock()
 			if room, ok := h.rooms[message.room]; ok {
-				slog.Info("Broadcasting to clients in room", "room", message.room, "clientCount", len(room.clients))
+				// Add to history
+				room.historyMux.Lock()
+				room.history = append(room.history, message.data)
+				if len(room.history) > historyCap {
+					room.history = room.history[1:] // Trim history
+				}
+				room.historyMux.Unlock()
+
+				// Broadcast
 				for client := range room.clients {
-					slog.Info("Attempting to send message to client", "room", message.room, "clientAddr", client.conn.RemoteAddr())
 					select {
 					case client.send <- message.data:
-						slog.Info("Message successfully queued for client", "clientAddr", client.conn.RemoteAddr())
 					default:
-						slog.Warn("Send channel full, closing client", "clientAddr", client.conn.RemoteAddr())
 						close(client.send)
 						delete(room.clients, client)
 					}
 				}
-			} else {
-				slog.Warn("Hub received broadcast for non-existent room", "room", message.room)
 			}
 			h.roomsMux.RUnlock()
 		}
@@ -122,12 +133,9 @@ func (c *Client) readPump() {
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				slog.Warn("readPump: Unexpected close error", "error", err)
-			} else {
-				slog.Info("readPump: Normal closure or error", "error", err)
 			}
 			break
 		}
-		slog.Info("Message received from client", "clientAddr", c.conn.RemoteAddr(), "dataLen", len(msgData))
 		message := &Message{room: c.room, data: msgData}
 		c.hub.broadcast <- message
 	}
@@ -144,20 +152,15 @@ func (c *Client) writePump() {
 		case message, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				slog.Info("writePump: send channel closed", "clientAddr", c.conn.RemoteAddr())
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-			slog.Info("writePump sending message to client", "clientAddr", c.conn.RemoteAddr(), "dataLen", len(message))
 			if err := c.conn.WriteMessage(websocket.BinaryMessage, message); err != nil {
-				slog.Warn("writePump: Error writing message", "error", err)
 				return
 			}
-			slog.Info("writePump message sent successfully", "clientAddr", c.conn.RemoteAddr())
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				slog.Warn("writePump: Error sending ping", "error", err)
 				return
 			}
 		}
