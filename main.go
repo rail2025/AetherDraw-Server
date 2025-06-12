@@ -12,10 +12,10 @@ import (
 
 // Constants for WebSocket configuration
 const (
-	writeWait      = 10 * time.Second    // Time allowed to write a message to the peer.
-	pongWait       = 60 * time.Second    // Time allowed to read the next pong message from the peer.
-	pingPeriod     = (pongWait * 9) / 10 // Send pings to peer with this period. Must be less than pongWait.
-	maxMessageSize = 16 * 1024           // Maximum message size allowed from peer (16KB).
+	writeWait      = 10 * time.Second
+	pongWait       = 60 * time.Second
+	pingPeriod     = (pongWait * 9) / 10
+	maxMessageSize = 16 * 1024
 )
 
 // --- Core Data Structures ---
@@ -24,12 +24,13 @@ const (
 type Client struct {
 	hub  *Hub
 	conn *websocket.Conn
-	send chan []byte // Buffered channel of outbound messages.
-	room string      // The ID of the room the client is in.
+	send chan []byte
+	room *Room // Pointer to the Room this client is in.
 }
 
 // Room holds the set of clients in a room and the message history.
 type Room struct {
+	id         string
 	clients    map[*Client]bool
 	broadcast  chan []byte
 	history    [][]byte
@@ -67,34 +68,62 @@ func (h *Hub) run() {
 		select {
 		case client := <-h.register:
 			h.roomsMux.Lock()
-			room, ok := h.rooms[client.room]
+			room, ok := h.rooms[client.room.id]
 			if !ok {
-				// Create the room if it doesn't exist.
 				room = &Room{
+					id:        client.room.id,
 					clients:   make(map[*Client]bool),
 					broadcast: make(chan []byte),
 					history:   make([][]byte, 0),
 				}
-				h.rooms[client.room] = room
-				slog.Info("Created new room", "room", client.room)
-				// We will run the room's broadcast loop in a future step.
+				h.rooms[client.room.id] = room
+				go room.run() // Start the room's own event loop.
+				slog.Info("Created new room", "room", client.room.id)
 			}
 			room.clients[client] = true
+			client.room = room // Give the client a direct pointer to the room struct.
 			h.roomsMux.Unlock()
-			slog.Info("Client registered", "room", client.room, "remoteAddr", client.conn.RemoteAddr())
+			slog.Info("Client registered", "room", client.room.id, "remoteAddr", client.conn.RemoteAddr())
 
-		case <-h.unregister:
-			//  corrected line.
-			// Unregistration logic will be added here.
+		case client := <-h.unregister:
+			h.roomsMux.RLock()
+			room, ok := h.rooms[client.room.id]
+			if ok {
+				if _, ok := room.clients[client]; ok {
+					delete(room.clients, client)
+					close(client.send)
+					slog.Info("Client unregistered", "room", room.id, "remoteAddr", client.conn.RemoteAddr())
+					// Room cleanup logic will be added later.
+				}
+			}
+			h.roomsMux.RUnlock()
+		}
+	}
+}
+
+// --- Room Methods ---
+
+func (r *Room) run() {
+	for {
+		select {
+		case message := <-r.broadcast:
+			// For now, we just broadcast. History logic will be added later.
+			for client := range r.clients {
+				select {
+				case client.send <- message:
+				default:
+					// Assume slow client, disconnect them.
+					close(client.send)
+					delete(r.clients, client)
+				}
+			}
 		}
 	}
 }
 
 // --- Client Methods ---
 
-// readPump pumps messages from the websocket connection to the hub.
 func (c *Client) readPump() {
-	// Unregister client on exit
 	defer func() {
 		c.hub.unregister <- c
 		c.conn.Close()
@@ -103,7 +132,6 @@ func (c *Client) readPump() {
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
 
-	// Message reading loop
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
@@ -112,12 +140,10 @@ func (c *Client) readPump() {
 			}
 			break
 		}
-		// We will add message broadcasting logic here later.
-		_ = message // Placeholder to avoid unused variable error
+		c.room.broadcast <- message // Send the received message to the room's broadcast channel.
 	}
 }
 
-// writePump pumps messages from the hub to the websocket connection.
 func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
@@ -129,16 +155,13 @@ func (c *Client) writePump() {
 		case message, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				// The hub closed the channel.
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-			// Send the message
 			if err := c.conn.WriteMessage(websocket.BinaryMessage, message); err != nil {
 				return
 			}
 		case <-ticker.C:
-			// Send a ping to the client
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
@@ -163,15 +186,18 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Create a temporary room struct just to pass the ID to the hub.
+	// The hub will assign the client to the real room struct.
+	tempRoom := &Room{id: passphrase}
+
 	client := &Client{
 		hub:  hub,
 		conn: conn,
-		send: make(chan []byte, 256), // 256-message send buffer
-		room: passphrase,
+		send: make(chan []byte, 256),
+		room: tempRoom,
 	}
 	client.hub.register <- client
 
-	// Start the read and write pumps as concurrent goroutines
 	go client.writePump()
 	go client.readPump()
 }
