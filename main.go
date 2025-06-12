@@ -5,8 +5,17 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
+)
+
+// Constants for WebSocket configuration
+const (
+	writeWait      = 10 * time.Second    // Time allowed to write a message to the peer.
+	pongWait       = 60 * time.Second    // Time allowed to read the next pong message from the peer.
+	pingPeriod     = (pongWait * 9) / 10 // Send pings to peer with this period. Must be less than pongWait.
+	maxMessageSize = 16 * 1024           // Maximum message size allowed from peer (16KB).
 )
 
 // --- Core Data Structures ---
@@ -39,13 +48,12 @@ type Hub struct {
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		// In production, you should validate the origin.
-		// For now, we allow any origin for development purposes.
 		return true
 	},
 }
 
-// newHub creates and initializes a new Hub.
+// --- Hub Methods ---
+
 func newHub() *Hub {
 	return &Hub{
 		register:   make(chan *Client),
@@ -54,25 +62,93 @@ func newHub() *Hub {
 	}
 }
 
-// run starts the Hub's event loop for managing client registrations.
 func (h *Hub) run() {
-	// This loop will handle new client connections and disconnections.
-	// We will implement the logic in a future step.
 	for {
 		select {
-		case <-h.register:
-			// Registration logic will be added here.
-		case <-h.unregister:
+		case client := <-h.register:
+			h.roomsMux.Lock()
+			room, ok := h.rooms[client.room]
+			if !ok {
+				// Create the room if it doesn't exist.
+				room = &Room{
+					clients:   make(map[*Client]bool),
+					broadcast: make(chan []byte),
+					history:   make([][]byte, 0),
+				}
+				h.rooms[client.room] = room
+				slog.Info("Created new room", "room", client.room)
+				// We will run the room's broadcast loop in a future step.
+			}
+			room.clients[client] = true
+			h.roomsMux.Unlock()
+			slog.Info("Client registered", "room", client.room, "remoteAddr", client.conn.RemoteAddr())
+
+		case client := <-h.unregister:
 			// Unregistration logic will be added here.
+		}
+	}
+}
+
+// --- Client Methods ---
+
+// readPump pumps messages from the websocket connection to the hub.
+func (c *Client) readPump() {
+	// Unregister client on exit
+	defer func() {
+		c.hub.unregister <- c
+		c.conn.Close()
+	}()
+	c.conn.SetReadLimit(maxMessageSize)
+	c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+
+	// Message reading loop
+	for {
+		_, message, err := c.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				slog.Warn("Unexpected close error", "error", err)
+			}
+			break
+		}
+		// We will add message broadcasting logic here later.
+		_ = message // Placeholder to avoid unused variable error
+	}
+}
+
+// writePump pumps messages from the hub to the websocket connection.
+func (c *Client) writePump() {
+	ticker := time.NewTicker(pingPeriod)
+	defer func() {
+		ticker.Stop()
+		c.conn.Close()
+	}()
+	for {
+		select {
+		case message, ok := <-c.send:
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if !ok {
+				// The hub closed the channel.
+				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+			// Send the message
+			if err := c.conn.WriteMessage(websocket.BinaryMessage, message); err != nil {
+				return
+			}
+		case <-ticker.C:
+			// Send a ping to the client
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
 		}
 	}
 }
 
 // --- HTTP Handler ---
 
-// serveWs handles websocket requests from the peer.
 func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
-	// Passphrase will be used as the room name.
 	passphrase := r.URL.Query().Get("passphrase")
 	if passphrase == "" {
 		slog.Warn("Connection attempt without passphrase")
@@ -86,18 +162,22 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Client creation logic will be added here to connect to the hub and room.
-	// For now, we just log the connection and close it.
-	slog.Info("Client connected", "room", passphrase, "remoteAddr", conn.RemoteAddr())
-	// In this temporary state, the connection will be immediately closed
-	// because we are not yet creating a Client struct and its read/write loops.
-	defer conn.Close()
+	client := &Client{
+		hub:  hub,
+		conn: conn,
+		send: make(chan []byte, 256), // 256-message send buffer
+		room: passphrase,
+	}
+	client.hub.register <- client
+
+	// Start the read and write pumps as concurrent goroutines
+	go client.writePump()
+	go client.readPump()
 }
 
 // --- Main Application ---
 
 func main() {
-	// Use structured logging
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
@@ -108,7 +188,6 @@ func main() {
 		serveWs(hub, w, r)
 	})
 
-	// For health checks and initial verification
 	http.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Hello, AetherDraw Relay Server!"))
 	})
