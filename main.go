@@ -77,13 +77,18 @@ func (h *Hub) run() {
 					history:   make([][]byte, 0),
 				}
 				h.rooms[client.room.id] = room
-				go room.run() // Start the room's own event loop.
+				go room.run()
 				slog.Info("Created new room", "room", client.room.id)
 			}
 			room.clients[client] = true
-			client.room = room // Give the client a direct pointer to the room struct.
+			client.room = room // Assign the real room pointer
 			h.roomsMux.Unlock()
+
 			slog.Info("Client registered", "room", client.room.id, "remoteAddr", client.conn.RemoteAddr())
+
+			// Start the client's goroutines now that it's fully registered.
+			go client.writePump()
+			go client.readPump()
 
 		case client := <-h.unregister:
 			h.roomsMux.RLock()
@@ -107,12 +112,10 @@ func (r *Room) run() {
 	for {
 		select {
 		case message := <-r.broadcast:
-			// For now, we just broadcast. History logic will be added later.
 			for client := range r.clients {
 				select {
 				case client.send <- message:
 				default:
-					// Assume slow client, disconnect them.
 					close(client.send)
 					delete(r.clients, client)
 				}
@@ -140,7 +143,7 @@ func (c *Client) readPump() {
 			}
 			break
 		}
-		c.room.broadcast <- message // Send the received message to the room's broadcast channel.
+		c.room.broadcast <- message
 	}
 }
 
@@ -187,7 +190,6 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create a temporary room struct just to pass the ID to the hub.
-	// The hub will assign the client to the real room struct.
 	tempRoom := &Room{id: passphrase}
 
 	client := &Client{
@@ -196,10 +198,9 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		send: make(chan []byte, 256),
 		room: tempRoom,
 	}
+	// Register the client with the hub. The hub is now responsible
+	// for starting the client's read/write pumps.
 	client.hub.register <- client
-
-	go client.writePump()
-	go client.readPump()
 }
 
 // --- Main Application ---
