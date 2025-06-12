@@ -10,7 +10,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Constants for WebSocket configuration
 const (
 	writeWait      = 10 * time.Second
 	pongWait       = 60 * time.Second
@@ -18,32 +17,34 @@ const (
 	maxMessageSize = 16 * 1024
 )
 
-// --- Core Data Structures ---
+// Message is a container for data sent from a client to the hub.
+type Message struct {
+	room string
+	data []byte
+}
 
+// Client is a middleman between the websocket connection and the hub.
 type Client struct {
 	hub  *Hub
 	conn *websocket.Conn
 	send chan []byte
-	room *Room
+	room string
 }
 
+// Room holds the set of clients.
 type Room struct {
-	id         string
-	clients    map[*Client]bool
-	clientsMux sync.RWMutex // Protects the clients map
-	broadcast  chan []byte
-	history    [][]byte
-	historyMux sync.RWMutex
+	clients map[*Client]bool
+	// History and other room-specific data will be added back later.
 }
 
+// Hub maintains the set of active clients and broadcasts messages to the correct rooms.
 type Hub struct {
 	rooms      map[string]*Room
 	roomsMux   sync.RWMutex
+	broadcast  chan *Message
 	register   chan *Client
 	unregister chan *Client
 }
-
-// --- Global State ---
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
@@ -51,10 +52,9 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-// --- Hub Methods ---
-
 func newHub() *Hub {
 	return &Hub{
+		broadcast:  make(chan *Message),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		rooms:      make(map[string]*Room),
@@ -66,65 +66,45 @@ func (h *Hub) run() {
 		select {
 		case client := <-h.register:
 			h.roomsMux.Lock()
-			room, ok := h.rooms[client.room.id]
+			room, ok := h.rooms[client.room]
 			if !ok {
 				room = &Room{
-					id:        client.room.id,
-					clients:   make(map[*Client]bool),
-					broadcast: make(chan []byte),
-					history:   make([][]byte, 0),
+					clients: make(map[*Client]bool),
 				}
-				h.rooms[client.room.id] = room
-				go room.run()
-				slog.Info("Created new room", "room", client.room.id)
+				h.rooms[client.room] = room
+				slog.Info("Created new room", "room", client.room)
+			}
+			room.clients[client] = true
+			h.roomsMux.Unlock()
+			slog.Info("Client registered", "room", client.room, "remoteAddr", client.conn.RemoteAddr())
+
+		case client := <-h.unregister:
+			h.roomsMux.Lock()
+			if room, ok := h.rooms[client.room]; ok {
+				if _, ok := room.clients[client]; ok {
+					delete(room.clients, client)
+					close(client.send)
+					slog.Info("Client unregistered", "room", client.room, "remoteAddr", client.conn.RemoteAddr())
+				}
 			}
 			h.roomsMux.Unlock()
 
-			room.clientsMux.Lock()
-			room.clients[client] = true
-			room.clientsMux.Unlock()
-
-			client.room = room
-
-			slog.Info("Client registered", "room", client.room.id, "remoteAddr", client.conn.RemoteAddr())
-			go client.writePump()
-			go client.readPump()
-
-		case client := <-h.unregister:
-			if client.room != nil {
-				client.room.clientsMux.Lock()
-				if _, ok := client.room.clients[client]; ok {
-					delete(client.room.clients, client)
-					close(client.send)
-					slog.Info("Client unregistered", "room", client.room.id, "remoteAddr", client.conn.RemoteAddr())
+		case message := <-h.broadcast:
+			h.roomsMux.RLock()
+			if room, ok := h.rooms[message.room]; ok {
+				for client := range room.clients {
+					select {
+					case client.send <- message.data:
+					default:
+						close(client.send)
+						delete(room.clients, client)
+					}
 				}
-				client.room.clientsMux.Unlock()
 			}
+			h.roomsMux.RUnlock()
 		}
 	}
 }
-
-// --- Room Methods ---
-
-func (r *Room) run() {
-	for {
-		select {
-		case message := <-r.broadcast:
-			r.clientsMux.RLock()
-			for client := range r.clients {
-				select {
-				case client.send <- message:
-				default:
-					close(client.send)
-					// The client will be removed from the map in the hub's unregister logic
-				}
-			}
-			r.clientsMux.RUnlock()
-		}
-	}
-}
-
-// --- Client Methods ---
 
 func (c *Client) readPump() {
 	defer func() {
@@ -136,14 +116,15 @@ func (c *Client) readPump() {
 	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
 
 	for {
-		_, message, err := c.conn.ReadMessage()
+		_, msgData, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				slog.Warn("Unexpected close error", "error", err)
 			}
 			break
 		}
-		c.room.broadcast <- message
+		message := &Message{room: c.room, data: msgData}
+		c.hub.broadcast <- message
 	}
 }
 
@@ -173,8 +154,6 @@ func (c *Client) writePump() {
 	}
 }
 
-// --- HTTP Handler ---
-
 func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	passphrase := r.URL.Query().Get("passphrase")
 	if passphrase == "" {
@@ -182,24 +161,22 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Passphrase is required", http.StatusBadRequest)
 		return
 	}
-
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Error("Failed to upgrade connection", "error", err)
 		return
 	}
-
-	tempRoom := &Room{id: passphrase}
 	client := &Client{
 		hub:  hub,
 		conn: conn,
 		send: make(chan []byte, 256),
-		room: tempRoom,
+		room: passphrase,
 	}
 	client.hub.register <- client
-}
 
-// --- Main Application ---
+	go client.writePump()
+	go client.readPump()
+}
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
