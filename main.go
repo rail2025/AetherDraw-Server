@@ -18,13 +18,11 @@ const (
 	maxMessageSize = 16 * 1024
 )
 
-// Message is a container for data sent from a client to the hub.
 type Message struct {
 	room string
 	data []byte
 }
 
-// Client is a middleman between the websocket connection and the hub.
 type Client struct {
 	hub  *Hub
 	conn *websocket.Conn
@@ -32,14 +30,12 @@ type Client struct {
 	room string
 }
 
-// Room holds the set of clients.
 type Room struct {
 	clients map[*Client]bool
 }
 
-// Hub maintains the set of active clients and broadcasts messages to the correct rooms.
 type Hub struct {
-	serverID   string // A unique ID for this server instance.
+	serverID   string
 	rooms      map[string]*Room
 	roomsMux   sync.RWMutex
 	broadcast  chan *Message
@@ -48,14 +44,12 @@ type Hub struct {
 }
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
+	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
 func newHub() *Hub {
 	return &Hub{
-		serverID:   uuid.New().String(), // Assign a unique ID on startup.
+		serverID:   uuid.New().String(),
 		broadcast:  make(chan *Message),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
@@ -71,15 +65,13 @@ func (h *Hub) run() {
 			h.roomsMux.Lock()
 			room, ok := h.rooms[client.room]
 			if !ok {
-				room = &Room{
-					clients: make(map[*Client]bool),
-				}
+				room = &Room{clients: make(map[*Client]bool)}
 				h.rooms[client.room] = room
 				slog.Info("Created new room", "room", client.room, "serverID", h.serverID)
 			}
 			room.clients[client] = true
 			h.roomsMux.Unlock()
-			slog.Info("Client registered", "room", client.room, "serverID", h.serverID, "remoteAddr", client.conn.RemoteAddr())
+			slog.Info("Client registered", "room", client.room, "serverID", h.serverID)
 
 		case client := <-h.unregister:
 			h.roomsMux.Lock()
@@ -87,22 +79,29 @@ func (h *Hub) run() {
 				if _, ok := room.clients[client]; ok {
 					delete(room.clients, client)
 					close(client.send)
-					slog.Info("Client unregistered", "room", client.room, "serverID", h.serverID, "remoteAddr", client.conn.RemoteAddr())
+					slog.Info("Client unregistered", "room", client.room, "serverID", h.serverID)
 				}
 			}
 			h.roomsMux.Unlock()
 
 		case message := <-h.broadcast:
+			slog.Info("Hub received message to broadcast", "room", message.room, "serverID", h.serverID, "dataLen", len(message.data))
 			h.roomsMux.RLock()
 			if room, ok := h.rooms[message.room]; ok {
+				slog.Info("Broadcasting to clients in room", "room", message.room, "clientCount", len(room.clients))
 				for client := range room.clients {
+					slog.Info("Attempting to send message to client", "room", message.room, "clientAddr", client.conn.RemoteAddr())
 					select {
 					case client.send <- message.data:
+						slog.Info("Message successfully queued for client", "clientAddr", client.conn.RemoteAddr())
 					default:
+						slog.Warn("Send channel full, closing client", "clientAddr", client.conn.RemoteAddr())
 						close(client.send)
 						delete(room.clients, client)
 					}
 				}
+			} else {
+				slog.Warn("Hub received broadcast for non-existent room", "room", message.room)
 			}
 			h.roomsMux.RUnlock()
 		}
@@ -122,10 +121,13 @@ func (c *Client) readPump() {
 		_, msgData, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				slog.Warn("Unexpected close error", "error", err, "serverID", c.hub.serverID)
+				slog.Warn("readPump: Unexpected close error", "error", err)
+			} else {
+				slog.Info("readPump: Normal closure or error", "error", err)
 			}
 			break
 		}
+		slog.Info("Message received from client", "clientAddr", c.conn.RemoteAddr(), "dataLen", len(msgData))
 		message := &Message{room: c.room, data: msgData}
 		c.hub.broadcast <- message
 	}
@@ -142,15 +144,20 @@ func (c *Client) writePump() {
 		case message, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
+				slog.Info("writePump: send channel closed", "clientAddr", c.conn.RemoteAddr())
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
+			slog.Info("writePump sending message to client", "clientAddr", c.conn.RemoteAddr(), "dataLen", len(message))
 			if err := c.conn.WriteMessage(websocket.BinaryMessage, message); err != nil {
+				slog.Warn("writePump: Error writing message", "error", err)
 				return
 			}
+			slog.Info("writePump message sent successfully", "clientAddr", c.conn.RemoteAddr())
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				slog.Warn("writePump: Error sending ping", "error", err)
 				return
 			}
 		}
@@ -160,13 +167,12 @@ func (c *Client) writePump() {
 func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	passphrase := r.URL.Query().Get("passphrase")
 	if passphrase == "" {
-		slog.Warn("Connection attempt without passphrase", "serverID", hub.serverID)
 		http.Error(w, "Passphrase is required", http.StatusBadRequest)
 		return
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		slog.Error("Failed to upgrade connection", "error", err, "serverID", hub.serverID)
+		slog.Error("Failed to upgrade connection", "error", err)
 		return
 	}
 	client := &Client{
@@ -184,23 +190,18 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
-
 	hub := newHub()
 	go hub.run()
-
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(hub, w, r)
 	})
-
 	http.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Hello, AetherDraw Relay Server!"))
 	})
-
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-
 	slog.Info("Server starting", "port", port)
 	err := http.ListenAndServe(":"+port, nil)
 	if err != nil {
