@@ -20,24 +20,22 @@ const (
 
 // --- Core Data Structures ---
 
-// Client represents a single user connected via WebSocket.
 type Client struct {
 	hub  *Hub
 	conn *websocket.Conn
 	send chan []byte
-	room *Room // Pointer to the Room this client is in.
+	room *Room
 }
 
-// Room holds the set of clients in a room and the message history.
 type Room struct {
 	id         string
 	clients    map[*Client]bool
+	clientsMux sync.RWMutex // Protects the clients map
 	broadcast  chan []byte
 	history    [][]byte
 	historyMux sync.RWMutex
 }
 
-// Hub maintains the set of active rooms and broadcasts messages.
 type Hub struct {
 	rooms      map[string]*Room
 	roomsMux   sync.RWMutex
@@ -80,28 +78,28 @@ func (h *Hub) run() {
 				go room.run()
 				slog.Info("Created new room", "room", client.room.id)
 			}
-			room.clients[client] = true
-			client.room = room // Assign the real room pointer
 			h.roomsMux.Unlock()
 
-			slog.Info("Client registered", "room", client.room.id, "remoteAddr", client.conn.RemoteAddr())
+			room.clientsMux.Lock()
+			room.clients[client] = true
+			room.clientsMux.Unlock()
 
-			// Start the client's goroutines now that it's fully registered.
+			client.room = room
+
+			slog.Info("Client registered", "room", client.room.id, "remoteAddr", client.conn.RemoteAddr())
 			go client.writePump()
 			go client.readPump()
 
 		case client := <-h.unregister:
-			h.roomsMux.RLock()
-			room, ok := h.rooms[client.room.id]
-			if ok {
-				if _, ok := room.clients[client]; ok {
-					delete(room.clients, client)
+			if client.room != nil {
+				client.room.clientsMux.Lock()
+				if _, ok := client.room.clients[client]; ok {
+					delete(client.room.clients, client)
 					close(client.send)
-					slog.Info("Client unregistered", "room", room.id, "remoteAddr", client.conn.RemoteAddr())
-					// Room cleanup logic will be added later.
+					slog.Info("Client unregistered", "room", client.room.id, "remoteAddr", client.conn.RemoteAddr())
 				}
+				client.room.clientsMux.Unlock()
 			}
-			h.roomsMux.RUnlock()
 		}
 	}
 }
@@ -112,14 +110,16 @@ func (r *Room) run() {
 	for {
 		select {
 		case message := <-r.broadcast:
+			r.clientsMux.RLock()
 			for client := range r.clients {
 				select {
 				case client.send <- message:
 				default:
 					close(client.send)
-					delete(r.clients, client)
+					// The client will be removed from the map in the hub's unregister logic
 				}
 			}
+			r.clientsMux.RUnlock()
 		}
 	}
 }
@@ -189,17 +189,13 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create a temporary room struct just to pass the ID to the hub.
 	tempRoom := &Room{id: passphrase}
-
 	client := &Client{
 		hub:  hub,
 		conn: conn,
 		send: make(chan []byte, 256),
 		room: tempRoom,
 	}
-	// Register the client with the hub. The hub is now responsible
-	// for starting the client's read/write pumps.
 	client.hub.register <- client
 }
 
