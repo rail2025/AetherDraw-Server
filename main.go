@@ -1,70 +1,127 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
+	"os"
+	"sync"
 
 	"github.com/gorilla/websocket"
 )
 
-// Configure the upgrader
+// --- Core Data Structures ---
+
+// Client represents a single user connected via WebSocket.
+type Client struct {
+	hub  *Hub
+	conn *websocket.Conn
+	send chan []byte // Buffered channel of outbound messages.
+	room string      // The ID of the room the client is in.
+}
+
+// Room holds the set of clients in a room and the message history.
+type Room struct {
+	clients    map[*Client]bool
+	broadcast  chan []byte
+	history    [][]byte
+	historyMux sync.RWMutex
+}
+
+// Hub maintains the set of active rooms and broadcasts messages.
+type Hub struct {
+	rooms      map[string]*Room
+	roomsMux   sync.RWMutex
+	register   chan *Client
+	unregister chan *Client
+}
+
+// --- Global State ---
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		// Allow all connections for now (you might want to restrict this in production)
+		// In production, you should validate the origin.
+		// For now, we allow any origin for development purposes.
 		return true
 	},
 }
 
-// Define a handler for WebSocket connections
-func handleConnections(w http.ResponseWriter, r *http.Request) {
-	// Upgrade initial GET request to a WebSocket
-	ws, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("Error upgrading to WebSocket: %v", err)
-		return
+// newHub creates and initializes a new Hub.
+func newHub() *Hub {
+	return &Hub{
+		register:   make(chan *Client),
+		unregister: make(chan *Client),
+		rooms:      make(map[string]*Room),
 	}
-	// Make sure we close the connection when the function returns
-	defer ws.Close()
+}
 
-	log.Println("Client Connected")
-
+// run starts the Hub's event loop for managing client registrations.
+func (h *Hub) run() {
+	// This loop will handle new client connections and disconnections.
+	// We will implement the logic in a future step.
 	for {
-		// Read message from browser
-		messageType, p, err := ws.ReadMessage()
-		if err != nil {
-			log.Printf("Error reading message: %v", err)
-			// Check if it's a normal closure
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("Unexpected close error: %v", err)
-			}
-			break // Break the loop to close conn and end goroutine
-		}
-
-		log.Printf("Received message: %s", string(p))
-
-		// Write message back to browser (echo)
-		if err := ws.WriteMessage(messageType, p); err != nil {
-			log.Printf("Error writing message: %v", err)
-			break // Break the loop
+		select {
+		case <-h.register:
+			// Registration logic will be added here.
+		case <-h.unregister:
+			// Unregistration logic will be added here.
 		}
 	}
 }
 
-func main() {
-	// Configure WebSocket route
-	http.HandleFunc("/ws", handleConnections)
+// --- HTTP Handler ---
 
-	// Configure the /hello route from before (optional, can be removed)
-	http.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Hello, AetherDraw Server with WebSocket support!"))
+// serveWs handles websocket requests from the peer.
+func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
+	// Passphrase will be used as the room name.
+	passphrase := r.URL.Query().Get("passphrase")
+	if passphrase == "" {
+		slog.Warn("Connection attempt without passphrase")
+		http.Error(w, "Passphrase is required", http.StatusBadRequest)
+		return
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		slog.Error("Failed to upgrade connection", "error", err)
+		return
+	}
+
+	// Client creation logic will be added here to connect to the hub and room.
+	// For now, we just log the connection and close it.
+	slog.Info("Client connected", "room", passphrase, "remoteAddr", conn.RemoteAddr())
+	// In this temporary state, the connection will be immediately closed
+	// because we are not yet creating a Client struct and its read/write loops.
+	defer conn.Close()
+}
+
+// --- Main Application ---
+
+func main() {
+	// Use structured logging
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
+
+	hub := newHub()
+	go hub.run()
+
+	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		serveWs(hub, w, r)
 	})
 
-	port := "8080"
-	log.Printf("Server starting on port %s, WebSocket on /ws\n", port)
+	// For health checks and initial verification
+	http.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("Hello, AetherDraw Relay Server!"))
+	})
 
-	// Start the server
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	slog.Info("Server starting", "port", port)
 	err := http.ListenAndServe(":"+port, nil)
 	if err != nil {
-		log.Fatalf("ListenAndServe: %v", err)
+		slog.Error("ListenAndServe failed", "error", err)
+		os.Exit(1)
 	}
 }
