@@ -28,7 +28,15 @@ const (
 	maxUsersShared = 48
 	// loneClientTimeout is the duration to wait before closing a room with only one client.
 	loneClientTimeout = 3 * time.Minute
+	// roomLifetime is the maximum duration a room can exist before being closed.
+	roomLifetime = 2 * time.Hour
+	// roomCheckInterval is the frequency at which to check for expired rooms.
+	roomCheckInterval = 5 * time.Minute
 )
+
+// warningMessage is the byte sequence sent to clients before the room is closed.
+// We will use '5' for the message type 'ROOM_CLOSING_IMMINENTLY'.
+var warningMessage = []byte{5}
 
 // Message represents a single message to be broadcast to a room.
 type Message struct {
@@ -47,7 +55,7 @@ type Client struct {
 	room string
 }
 
-// Room represents a single chat room, maintaining a set of active clients and a message history.
+// Room represents a single chat room.
 type Room struct {
 	// Registered clients.
 	clients map[*Client]bool
@@ -57,9 +65,11 @@ type Room struct {
 	historyMux sync.RWMutex
 	// Timer that triggers cleanup when only one client is left.
 	cleanupTimer *time.Timer
+	// The time the room was created.
+	creationTime time.Time
 }
 
-// Hub maintains the set of active rooms and broadcasts messages to the correct rooms.
+// Hub maintains the set of active rooms and broadcasts messages.
 type Hub struct {
 	// Registered rooms.
 	rooms map[string]*Room
@@ -77,8 +87,6 @@ type Hub struct {
 
 // upgrader upgrades HTTP connections to the WebSocket protocol.
 var upgrader = websocket.Upgrader{
-	// CheckOrigin allows all connections, useful for development.
-	// For production, this should be restricted to the client's domain.
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
@@ -97,36 +105,30 @@ func newHub() *Hub {
 func (h *Hub) run() {
 	for {
 		select {
-		// Handle client registration.
 		case client := <-h.register:
 			h.roomsMux.Lock()
 			room, ok := h.rooms[client.room]
 			if !ok {
 				room = &Room{
-					clients: make(map[*Client]bool),
-					history: make([][]byte, 0, historyCap),
+					clients:      make(map[*Client]bool),
+					history:      make([][]byte, 0, historyCap),
+					creationTime: time.Now(), // Set creation time for new rooms.
 				}
 				h.rooms[client.room] = room
 				slog.Info("Created new room", "room", client.room)
 			}
-
 			room.clients[client] = true
-
-			// If a cleanup timer was running, stop it because we now have more than one user.
 			if room.cleanupTimer != nil {
 				room.cleanupTimer.Stop()
 				room.cleanupTimer = nil
 				slog.Info("Stopped cleanup timer for room", "room", client.room)
 			}
-			
-			// **FIX**: If this new client is the *only* one in the room, start the timeout.
 			if len(room.clients) == 1 {
 				slog.Info("First client in room, starting cleanup timer", "room", client.room, "timeout", loneClientTimeout)
 				room.cleanupTimer = time.AfterFunc(loneClientTimeout, func() {
 					h.cleanupRoom <- client.room
 				})
 			}
-
 			h.roomsMux.Unlock()
 
 			room.historyMux.RLock()
@@ -140,7 +142,6 @@ func (h *Hub) run() {
 			room.historyMux.RUnlock()
 			slog.Info("Client registered and history sent", "room", client.room, "clients_in_room", len(room.clients))
 
-		// Handle client unregistration.
 		case client := <-h.unregister:
 			h.roomsMux.Lock()
 			if room, ok := h.rooms[client.room]; ok {
@@ -150,14 +151,12 @@ func (h *Hub) run() {
 					slog.Info("Client unregistered", "room", client.room, "clients_in_room", len(room.clients))
 
 					if len(room.clients) == 0 {
-						// If the room is now empty, ensure any existing timer is stopped and delete the room.
 						if room.cleanupTimer != nil {
 							room.cleanupTimer.Stop()
 						}
 						delete(h.rooms, client.room)
 						slog.Info("Room is empty, deleting", "room", client.room)
 					} else if len(room.clients) == 1 {
-						// If only one client remains, start the cleanup timer.
 						slog.Info("Only one client left in room, starting cleanup timer", "room", client.room, "timeout", loneClientTimeout)
 						room.cleanupTimer = time.AfterFunc(loneClientTimeout, func() {
 							h.cleanupRoom <- client.room
@@ -167,7 +166,6 @@ func (h *Hub) run() {
 			}
 			h.roomsMux.Unlock()
 
-		// Handle incoming messages for broadcast.
 		case message := <-h.broadcast:
 			h.roomsMux.RLock()
 			if room, ok := h.rooms[message.room]; ok {
@@ -177,7 +175,6 @@ func (h *Hub) run() {
 					room.history = room.history[1:]
 				}
 				room.historyMux.Unlock()
-
 				for client := range room.clients {
 					select {
 					case client.send <- message.data:
@@ -189,24 +186,47 @@ func (h *Hub) run() {
 			}
 			h.roomsMux.RUnlock()
 
-		// Handle room cleanup requests from timers.
 		case roomName := <-h.cleanupRoom:
 			h.roomsMux.Lock()
 			if room, ok := h.rooms[roomName]; ok {
-				if len(room.clients) == 1 {
-					for client := range room.clients {
-						close(client.send)
-					}
-					delete(h.rooms, roomName)
-					slog.Info("Closed room due to lone client timeout", "room", roomName)
+				// Broadcast the warning message to the room before closing.
+				slog.Info("Sending closing warning to room", "room", roomName)
+				for client := range room.clients {
+					client.send <- warningMessage
 				}
+
+				// Give clients a moment to receive the message before disconnecting.
+				time.Sleep(100 * time.Millisecond)
+
+				// Disconnect all clients and delete the room.
+				for client := range room.clients {
+					close(client.send)
+				}
+				delete(h.rooms, roomName)
+				slog.Info("Closed room due to timeout", "room", roomName)
 			}
 			h.roomsMux.Unlock()
 		}
 	}
 }
 
-// readPump pumps messages from the websocket connection to the hub.
+// cleanupExpiredRooms iterates through rooms and schedules them for cleanup if they are past their lifetime.
+func (h *Hub) cleanupExpiredRooms() {
+	h.roomsMux.RLock()
+	var expiredRooms []string
+	for name, room := range h.rooms {
+		if time.Since(room.creationTime) > roomLifetime {
+			expiredRooms = append(expiredRooms, name)
+		}
+	}
+	h.roomsMux.RUnlock()
+
+	for _, roomName := range expiredRooms {
+		slog.Info("Room has expired, scheduling for cleanup", "room", roomName, "lifetime", roomLifetime)
+		h.cleanupRoom <- roomName
+	}
+}
+
 func (c *Client) readPump() {
 	defer func() {
 		c.hub.unregister <- c
@@ -229,7 +249,6 @@ func (c *Client) readPump() {
 	}
 }
 
-// writePump pumps messages from the hub to the websocket connection.
 func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
@@ -256,7 +275,6 @@ func (c *Client) writePump() {
 	}
 }
 
-// serveWs handles websocket requests from the peer.
 func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	passphrase := r.URL.Query().Get("passphrase")
 	if passphrase == "" {
@@ -304,6 +322,15 @@ func main() {
 
 	hub := newHub()
 	go hub.run()
+
+	// Start a separate goroutine for periodically cleaning up old rooms.
+	go func() {
+		ticker := time.NewTicker(roomCheckInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			hub.cleanupExpiredRooms()
+		}
+	}()
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(hub, w, r)
