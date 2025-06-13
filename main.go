@@ -16,6 +16,8 @@ const (
 	pingPeriod     = (pongWait * 9) / 10
 	maxMessageSize = 16 * 1024
 	historyCap     = 5000
+	maxUsersParty  = 8
+	maxUsersShared = 48
 )
 
 type Message struct {
@@ -173,6 +175,24 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Passphrase is required", http.StatusBadRequest)
 		return
 	}
+	// Determine room type and max users based on passphrase prefix
+	isPartyRoom := len(passphrase) == 64 // Party ID hash is a fixed length
+	maxUsers := maxUsersShared
+	if isPartyRoom {
+		maxUsers = maxUsersParty
+	}
+
+	hub.roomsMux.Lock()
+	if room, ok := hub.rooms[passphrase]; ok {
+		if len(room.clients) >= maxUsers {
+			hub.roomsMux.Unlock()
+			http.Error(w, "Room is full", http.StatusForbidden)
+			slog.Warn("Rejected connection to full room", "room", passphrase, "current", len(room.clients), "max", maxUsers)
+			return
+		}
+	}
+	hub.roomsMux.Unlock()
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Error("Failed to upgrade connection", "error", err)
