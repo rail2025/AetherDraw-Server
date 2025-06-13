@@ -101,7 +101,6 @@ func (h *Hub) run() {
 		case client := <-h.register:
 			h.roomsMux.Lock()
 			room, ok := h.rooms[client.room]
-			// If the room doesn't exist, create it.
 			if !ok {
 				room = &Room{
 					clients: make(map[*Client]bool),
@@ -111,17 +110,25 @@ func (h *Hub) run() {
 				slog.Info("Created new room", "room", client.room)
 			}
 
-			// If a cleanup timer was running for this room (meaning it had one user who left and re-joined), stop it.
+			room.clients[client] = true
+
+			// If a cleanup timer was running, stop it because we now have more than one user.
 			if room.cleanupTimer != nil {
 				room.cleanupTimer.Stop()
 				room.cleanupTimer = nil
 				slog.Info("Stopped cleanup timer for room", "room", client.room)
 			}
+			
+			// **FIX**: If this new client is the *only* one in the room, start the timeout.
+			if len(room.clients) == 1 {
+				slog.Info("First client in room, starting cleanup timer", "room", client.room, "timeout", loneClientTimeout)
+				room.cleanupTimer = time.AfterFunc(loneClientTimeout, func() {
+					h.cleanupRoom <- client.room
+				})
+			}
 
-			room.clients[client] = true
 			h.roomsMux.Unlock()
 
-			// Send the existing room history to the newly connected client.
 			room.historyMux.RLock()
 			for _, msg := range room.history {
 				select {
@@ -142,8 +149,11 @@ func (h *Hub) run() {
 					close(client.send)
 					slog.Info("Client unregistered", "room", client.room, "clients_in_room", len(room.clients))
 
-					// If the room is now empty, delete it immediately.
 					if len(room.clients) == 0 {
+						// If the room is now empty, ensure any existing timer is stopped and delete the room.
+						if room.cleanupTimer != nil {
+							room.cleanupTimer.Stop()
+						}
 						delete(h.rooms, client.room)
 						slog.Info("Room is empty, deleting", "room", client.room)
 					} else if len(room.clients) == 1 {
@@ -183,9 +193,7 @@ func (h *Hub) run() {
 		case roomName := <-h.cleanupRoom:
 			h.roomsMux.Lock()
 			if room, ok := h.rooms[roomName]; ok {
-				// Verify the condition still holds (only one client) before deleting.
 				if len(room.clients) == 1 {
-					// Disconnect the last client and delete the room.
 					for client := range room.clients {
 						close(client.send)
 					}
