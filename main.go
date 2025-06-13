@@ -19,13 +19,15 @@ const (
 	// pingPeriod is the interval for sending pings to the peer. Must be less than pongWait.
 	pingPeriod = (pongWait * 9) / 10
 	// maxMessageSize is the maximum message size allowed from a peer.
-	maxMessageSize = 16 * 1024 // 16 KB 
-	// historyCap is the maximum number of messages to store in a room's history. 
+	maxMessageSize = 16 * 1024 // 16 KB
+	// historyCap is the maximum number of messages to store in a room's history.
 	historyCap = 5000
-	// maxUsersParty is the maximum number of users allowed in a party-based room. 
+	// maxUsersParty is the maximum number of users allowed in a party-based room.
 	maxUsersParty = 8
-	// maxUsersShared is the maximum number of users allowed in a passphrase-based room. 
+	// maxUsersShared is the maximum number of users allowed in a passphrase-based room.
 	maxUsersShared = 48
+	// loneClientTimeout is the duration to wait before closing a room with only one client.
+	loneClientTimeout = 3 * time.Minute
 )
 
 // Message represents a single message to be broadcast to a room.
@@ -49,10 +51,12 @@ type Client struct {
 type Room struct {
 	// Registered clients.
 	clients map[*Client]bool
-	// In-memory message history for the room. 
+	// In-memory message history for the room.
 	history [][]byte
 	// Mutex to protect access to the history slice.
 	historyMux sync.RWMutex
+	// Timer that triggers cleanup when only one client is left.
+	cleanupTimer *time.Timer
 }
 
 // Hub maintains the set of active rooms and broadcasts messages to the correct rooms.
@@ -67,6 +71,8 @@ type Hub struct {
 	register chan *Client
 	// Unregister requests from clients.
 	unregister chan *Client
+	// Room cleanup requests.
+	cleanupRoom chan string
 }
 
 // upgrader upgrades HTTP connections to the WebSocket protocol.
@@ -79,10 +85,11 @@ var upgrader = websocket.Upgrader{
 // newHub creates a new Hub instance.
 func newHub() *Hub {
 	return &Hub{
-		broadcast:  make(chan *Message),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		rooms:      make(map[string]*Room),
+		broadcast:   make(chan *Message),
+		register:    make(chan *Client),
+		unregister:  make(chan *Client),
+		cleanupRoom: make(chan string),
+		rooms:       make(map[string]*Room),
 	}
 }
 
@@ -103,13 +110,20 @@ func (h *Hub) run() {
 				h.rooms[client.room] = room
 				slog.Info("Created new room", "room", client.room)
 			}
+
+			// If a cleanup timer was running for this room (meaning it had one user who left and re-joined), stop it.
+			if room.cleanupTimer != nil {
+				room.cleanupTimer.Stop()
+				room.cleanupTimer = nil
+				slog.Info("Stopped cleanup timer for room", "room", client.room)
+			}
+
 			room.clients[client] = true
 			h.roomsMux.Unlock()
 
-			// Send the existing room history to the newly connected client. 
+			// Send the existing room history to the newly connected client.
 			room.historyMux.RLock()
 			for _, msg := range room.history {
-				// Use a select to avoid blocking if the client's send buffer is full.
 				select {
 				case client.send <- msg:
 				default:
@@ -127,6 +141,18 @@ func (h *Hub) run() {
 					delete(room.clients, client)
 					close(client.send)
 					slog.Info("Client unregistered", "room", client.room, "clients_in_room", len(room.clients))
+
+					// If the room is now empty, delete it immediately.
+					if len(room.clients) == 0 {
+						delete(h.rooms, client.room)
+						slog.Info("Room is empty, deleting", "room", client.room)
+					} else if len(room.clients) == 1 {
+						// If only one client remains, start the cleanup timer.
+						slog.Info("Only one client left in room, starting cleanup timer", "room", client.room, "timeout", loneClientTimeout)
+						room.cleanupTimer = time.AfterFunc(loneClientTimeout, func() {
+							h.cleanupRoom <- client.room
+						})
+					}
 				}
 			}
 			h.roomsMux.Unlock()
@@ -135,28 +161,39 @@ func (h *Hub) run() {
 		case message := <-h.broadcast:
 			h.roomsMux.RLock()
 			if room, ok := h.rooms[message.room]; ok {
-				// Add the new message to the room's history. 
 				room.historyMux.Lock()
 				room.history = append(room.history, message.data)
-				// Trim the history if it exceeds the capacity. 
 				if len(room.history) > historyCap {
-					// Slice from the second element to the end, effectively removing the oldest.
 					room.history = room.history[1:]
 				}
 				room.historyMux.Unlock()
 
-				// Broadcast the message to all clients in the room. 
 				for client := range room.clients {
 					select {
 					case client.send <- message.data:
 					default:
-						// If the send channel is blocked, assume the client is dead or stuck.
 						close(client.send)
 						delete(room.clients, client)
 					}
 				}
 			}
 			h.roomsMux.RUnlock()
+
+		// Handle room cleanup requests from timers.
+		case roomName := <-h.cleanupRoom:
+			h.roomsMux.Lock()
+			if room, ok := h.rooms[roomName]; ok {
+				// Verify the condition still holds (only one client) before deleting.
+				if len(room.clients) == 1 {
+					// Disconnect the last client and delete the room.
+					for client := range room.clients {
+						close(client.send)
+					}
+					delete(h.rooms, roomName)
+					slog.Info("Closed room due to lone client timeout", "room", roomName)
+				}
+			}
+			h.roomsMux.Unlock()
 		}
 	}
 }
@@ -172,16 +209,13 @@ func (c *Client) readPump() {
 	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
 
 	for {
-		// ReadMessage blocks until a message is received.
 		_, msgData, err := c.conn.ReadMessage()
 		if err != nil {
-			// Log unexpected close errors.
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 				slog.Warn("readPump: Unexpected close error", "error", err)
 			}
 			break
 		}
-		// Create a message and send it to the hub's broadcast channel.
 		message := &Message{room: c.room, data: msgData}
 		c.hub.broadcast <- message
 	}
@@ -196,19 +230,15 @@ func (c *Client) writePump() {
 	}()
 	for {
 		select {
-		// Wait for a message from the client's send channel.
 		case message, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				// The hub closed the channel.
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-			// Write the message to the websocket connection.
 			if err := c.conn.WriteMessage(websocket.BinaryMessage, message); err != nil {
 				return
 			}
-		// Or, send a ping message at regular intervals.
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
@@ -225,18 +255,14 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Passphrase is required", http.StatusBadRequest)
 		return
 	}
-	// Determine room type and max users based on passphrase length.
-	// A 64-character passphrase is assumed to be a SHA-256 hash of a party ID.
 	isPartyRoom := len(passphrase) == 64
 	maxUsers := maxUsersShared
 	if isPartyRoom {
 		maxUsers = maxUsersParty
 	}
 
-	// Lock the hub to check room status before upgrading the connection.
 	hub.roomsMux.Lock()
 	if room, ok := hub.rooms[passphrase]; ok {
-		// If room exists, check if it's full.
 		if len(room.clients) >= maxUsers {
 			hub.roomsMux.Unlock()
 			http.Error(w, "Room is full", http.StatusForbidden)
@@ -246,54 +272,44 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	}
 	hub.roomsMux.Unlock()
 
-	// Upgrade the HTTP connection to a WebSocket connection.
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Error("Failed to upgrade connection", "error", err)
 		return
 	}
-	// Create a new client.
 	client := &Client{
 		hub:  hub,
 		conn: conn,
-		send: make(chan []byte, 256), // Buffered channel to prevent blocking.
+		send: make(chan []byte, 256),
 		room: passphrase,
 	}
-	// Register the new client with the hub.
 	client.hub.register <- client
 
-	// Start the read and write pumps in separate goroutines.
 	go client.writePump()
 	go client.readPump()
 }
 
 // main is the entry point for the application.
 func main() {
-	// Initialize structured JSON logger. 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
-	// Create and run the central hub.
 	hub := newHub()
 	go hub.run()
 
-	// Define HTTP routes.
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(hub, w, r)
 	})
-	// A simple health check endpoint.
 	http.HandleFunc("/hello", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Hello, AetherDraw Relay Server!"))
 	})
 
-	// Determine port from environment variables, with a fallback for local dev.
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
 	slog.Info("Server starting", "port", port)
-	// Start the HTTP server.
 	err := http.ListenAndServe(":"+port, nil)
 	if err != nil {
 		slog.Error("ListenAndServe failed", "error", err)
