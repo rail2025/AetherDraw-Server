@@ -8,10 +8,16 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"golang.org/x/time/rate" // Import the rate limiting package
 )
 
 // Constants for WebSocket and Hub configuration.
 const (
+	// To adjust the rate limit, change the number in rate.Limit(10).
+	rateLimit = rate.Limit(10) // 10 messages per second
+	// To adjust the burst allowance, change the number here.
+	burstSize = 20
+
 	// writeWait is the time allowed to write a message to the peer.
 	writeWait = 10 * time.Second
 	// pongWait is the time allowed to read the next pong message from the peer.
@@ -35,13 +41,13 @@ const (
 )
 
 // warningMessage is the byte sequence sent to clients before the room is closed.
-// We will use '5' for the message type 'ROOM_CLOSING_IMMINENTLY'.
 var warningMessage = []byte{5}
 
 // Message represents a single message to be broadcast to a room.
 type Message struct {
-	room string
-	data []byte
+	room   string
+	data   []byte
+	sender *Client
 }
 
 // Client is a middleman between the websocket connection and the hub.
@@ -53,6 +59,8 @@ type Client struct {
 	send chan []byte
 	// The room this client is connected to.
 	room string
+	// Rate limiter for this client.
+	limiter *rate.Limiter
 }
 
 // Room represents a single chat room.
@@ -112,7 +120,7 @@ func (h *Hub) run() {
 				room = &Room{
 					clients:      make(map[*Client]bool),
 					history:      make([][]byte, 0, historyCap),
-					creationTime: time.Now(), // Set creation time for new rooms.
+					creationTime: time.Now(),
 				}
 				h.rooms[client.room] = room
 				slog.Info("Created new room", "room", client.room)
@@ -176,6 +184,10 @@ func (h *Hub) run() {
 				}
 				room.historyMux.Unlock()
 				for client := range room.clients {
+					// Do not send the message back to the sender
+					if client == message.sender {
+						continue
+					}
 					select {
 					case client.send <- message.data:
 					default:
@@ -189,16 +201,13 @@ func (h *Hub) run() {
 		case roomName := <-h.cleanupRoom:
 			h.roomsMux.Lock()
 			if room, ok := h.rooms[roomName]; ok {
-				// Broadcast the warning message to the room before closing.
 				slog.Info("Sending closing warning to room", "room", roomName)
 				for client := range room.clients {
 					client.send <- warningMessage
 				}
 
-				// Give clients a moment to receive the message before disconnecting.
 				time.Sleep(100 * time.Millisecond)
 
-				// Disconnect all clients and delete the room.
 				for client := range room.clients {
 					close(client.send)
 				}
@@ -237,6 +246,12 @@ func (c *Client) readPump() {
 	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
 
 	for {
+		// Check the rate limiter before reading a message.
+		if !c.limiter.Allow() {
+			slog.Warn("Rate limit exceeded, disconnecting client", "room", c.room)
+			c.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "rate limit exceeded"))
+			break
+		}
 		_, msgData, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
@@ -244,7 +259,7 @@ func (c *Client) readPump() {
 			}
 			break
 		}
-		message := &Message{room: c.room, data: msgData}
+		message := &Message{room: c.room, data: msgData, sender: c}
 		c.hub.broadcast <- message
 	}
 }
@@ -303,11 +318,15 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		slog.Error("Failed to upgrade connection", "error", err)
 		return
 	}
+	// Create and initialize the rate limiter for the new client.
+	limiter := rate.NewLimiter(rateLimit, burstSize)
+
 	client := &Client{
-		hub:  hub,
-		conn: conn,
-		send: make(chan []byte, 256),
-		room: passphrase,
+		hub:     hub,
+		conn:    conn,
+		send:    make(chan []byte, 256),
+		room:    passphrase,
+		limiter: limiter,
 	}
 	client.hub.register <- client
 
