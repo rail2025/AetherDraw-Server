@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"golang.org/x/time/rate" // Import the rate limiting package
+	"golang.org/x/time/rate"
 )
 
 // Constants for WebSocket and Hub configuration.
@@ -241,6 +244,12 @@ func (c *Client) readPump() {
 	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
 
 	for {
+		// Check the rate limiter after reading a message.
+		if !c.limiter.Allow() {
+			slog.Warn("Rate limit exceeded, ignoring message", "room", c.room)
+			continue // Ignore the message and continue the loop.
+		}
+
 		_, msgData, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
@@ -248,13 +257,6 @@ func (c *Client) readPump() {
 			}
 			break
 		}
-
-		// Check the rate limiter after reading a message.
-		if !c.limiter.Allow() {
-			slog.Warn("Rate limit exceeded, ignoring message", "room", c.room)
-			continue // Ignore the message and continue the loop.
-		}
-
 		message := &Message{room: c.room, data: msgData}
 		c.hub.broadcast <- message
 	}
@@ -332,13 +334,15 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 
 // main is the entry point for the application.
 func main() {
+	// Setup structured logging.
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
+	// Create and run the central hub in a separate goroutine.
 	hub := newHub()
 	go hub.run()
 
-	// Start a separate goroutine for periodically cleaning up old rooms.
+	// Start a goroutine for periodically cleaning up old rooms.
 	go func() {
 		ticker := time.NewTicker(roomCheckInterval)
 		defer ticker.Stop()
@@ -347,6 +351,14 @@ func main() {
 		}
 	}()
 
+	// Configure the HTTP server.
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	server := &http.Server{
+		Addr: ":" + port,
+	}
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(hub, w, r)
 	})
@@ -354,15 +366,33 @@ func main() {
 		w.Write([]byte("Hello, AetherDraw Relay Server!"))
 	})
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
+	// Start the server in a goroutine so it doesn't block.
+	go func() {
+		slog.Info("Server starting", "port", port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("ListenAndServe failed", "error", err)
+			os.Exit(1)
+		}
+	}()
 
-	slog.Info("Server starting", "port", port)
-	err := http.ListenAndServe(":"+port, nil)
-	if err != nil {
-		slog.Error("ListenAndServe failed", "error", err)
+	// --- Graceful Shutdown Logic ---
+	// Create a channel to receive OS signals.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// Block until a signal is received.
+	<-quit
+	slog.Warn("Shutdown signal received, shutting down gracefully...")
+
+	// Create a context with a timeout to allow existing connections to finish.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Attempt to gracefully shut down the server.
+	if err := server.Shutdown(ctx); err != nil {
+		slog.Error("Server forced to shutdown", "error", err)
 		os.Exit(1)
 	}
+
+	slog.Info("Server gracefully stopped")
 }
