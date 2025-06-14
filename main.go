@@ -14,7 +14,7 @@ import (
 // Constants for WebSocket and Hub configuration.
 const (
 	// To adjust the rate limit, change the number in rate.Limit(10).
-	rateLimit = rate.Limit(1) // 10 messages per second
+	rateLimit = rate.Limit(10) // 10 messages per second
 	// To adjust the burst allowance, change the number here.
 	burstSize = 20
 
