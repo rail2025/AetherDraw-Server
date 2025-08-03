@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -751,4 +750,5 @@ func main() {
 	}
 
 	slog.Info("Server gracefully stopped")
+
 }
