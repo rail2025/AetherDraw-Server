@@ -149,15 +149,14 @@ function renderAll() {
             case 'rectangle': fabricObject = new fabric.Rect({ ...commonProps, left: drawable.left, top: drawable.top, width: drawable.width, height: drawable.height }); break;
             case 'circle': fabricObject = new fabric.Circle({ ...commonProps, left: drawable.left, top: drawable.top, radius: drawable.radius }); break;
             case 'triangle': fabricObject = new fabric.Triangle({ ...commonProps, left: drawable.left, top: drawable.top, width: drawable.width, height: drawable.height }); break;
-            case 'pen': case 'dash':
-            case 'line':
+            case 'pen': case 'dash': case 'line':
                 fabricObject = new fabric.Polyline(drawable.points, { ...commonProps, stroke: drawable.stroke, fill: null, strokeDashArray: drawable.objectDrawMode === 'dash' ? [drawable.thickness * 2.5, drawable.thickness * 1.25] : null });
                 break;
             case 'arrow':
-                const line = new fabric.Line([drawable.x1, drawable.y1, drawable.x2, drawable.y2], { stroke: drawable.stroke, strokeWidth: drawable.strokeWidth, originX: 'center', originY: 'center' });
-                const angle = Math.atan2(drawable.y2 - drawable.y1, drawable.x2 - drawable.x1) * 180 / Math.PI;
-                const arrowHead = new fabric.Triangle({ height: drawable.strokeWidth * 4, width: drawable.strokeWidth * 4, fill: drawable.stroke, angle: 90, originX: 'center', originY: 'center' });
-                fabricObject = new fabric.Group([line, arrowHead], { angle: angle, left: (drawable.x1 + drawable.x2) / 2, top: (drawable.y1 + drawable.y2) / 2, selectable: state.currentDrawMode === 'select', originX: 'center', originY: 'center' });
+                 const line = new fabric.Line([drawable.x1, drawable.y1, drawable.x2, drawable.y2], { stroke: drawable.stroke, strokeWidth: drawable.strokeWidth, originX: 'center', originY: 'center' });
+                 const angle = Math.atan2(drawable.y2 - drawable.y1, drawable.x2 - drawable.x1) * 180 / Math.PI;
+                 const arrowHead = new fabric.Triangle({ height: drawable.strokeWidth * 4, width: drawable.strokeWidth * 4, fill: drawable.stroke, angle: 90, originX: 'center', originY: 'center' });
+                 fabricObject = new fabric.Group([line, arrowHead], { angle: angle, left: (drawable.x1 + drawable.x2) / 2, top: (drawable.y1 + drawable.y2) / 2, selectable: state.currentDrawMode === 'select', originX: 'center', originY: 'center' });
                 break;
             case 'icon':
                 const iconPath = iconMap[drawable.iconId];
@@ -276,6 +275,7 @@ canvas.on('object:modified', (e) => {
 // =================================================================
 // Toolbar & Icon Logic
 // =================================================================
+const iconUrlBase = '/icons/';
 const toolDefinitions = {
     'Drawing': [ { id: 'pen', name: 'Pen' }, { id: 'line', name: 'Line' }, { id: 'dash', name: 'Dash' }],
     'Shapes': [ { id: 'rectangle', name: 'Rect' }, { id: 'circle', name: 'Circle' }, { id: 'arrow', name: 'Arrow' }, { id: 'triangle', name: 'Triangle' }],
@@ -351,7 +351,7 @@ function setActiveTool(toolId) {
     if (groupButton) {
         groupButton.classList.add('active');
         const clickedContent = clickedButton.querySelector('img');
-        groupButton.innerHTML = clickedContent ? clickedContent.outerHTML : clickedButton.textContent;
+        groupButton.innerHTML = clickedContent ? clickedContent.outerHTML : `<span>${clickedButton.textContent}</span>`;
     } else {
         clickedButton.classList.add('active');
     }
