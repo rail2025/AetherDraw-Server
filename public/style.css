@@ -8,14 +8,14 @@ body {
 }
 
 #toolbar {
-    width: 160px; /* Increased width */
+    width: 160px;
     padding: 10px;
     background-color: #2e2e2e;
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
     overflow-y: auto;
-    z-index: 100; /* Ensure toolbar is on top */
+    z-index: 100;
 }
 
 /* --- Grids --- */
@@ -25,7 +25,9 @@ body {
     gap: 5px;
 }
 .preset-grid {
+    display: grid;
     grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 5px;
 }
 .color-palette {
     display: grid;
@@ -42,6 +44,9 @@ button {
     border-radius: 3px;
     cursor: pointer;
     font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 button:hover {
     background-color: #5a5a5a;
@@ -59,37 +64,44 @@ button.active {
     width: 100%;
     text-transform: capitalize;
 }
+.tool-group-btn img, .tool-popup img {
+    height: 24px;
+    max-width: 100%;
+}
+
 
 /* --- Tool Popups --- */
 .tool-group {
     position: relative;
 }
 .tool-popup {
-    display: none; /* Hidden by default */
+    display: none;
     position: absolute;
-    left: 105%; /* Position next to the toolbar */
+    left: 105%;
     top: 0;
     background-color: #3a3a3a;
     border: 1px solid #666;
     border-radius: 4px;
     padding: 5px;
-    z-index: 200; /* Higher z-index to appear over the canvas */
-    width: 120px;
+    z-index: 200;
+    width: 150px;
     box-shadow: 3px 3px 8px rgba(0,0,0,0.5);
 }
 .tool-popup.active {
-    display: block; /* Shown when active */
+    display: block;
 }
 .tool-popup button {
-    display: block;
+    display: flex;
     width: 100%;
     margin-bottom: 5px;
-    text-align: left;
+    justify-content: flex-start;
 }
 .tool-popup button:last-child {
     margin-bottom: 0;
 }
-
+.tool-popup img {
+    margin-right: 8px;
+}
 
 /* --- Toggles & Presets --- */
 .fill-toggle {
@@ -159,6 +171,7 @@ button.active {
     padding-top: 10px;
 }
 .footer-btn {
+    text-decoration: none;
     height: 40px;
     font-size: 11px;
 }
@@ -166,15 +179,3 @@ button.active {
 .bug-report:hover { background-color: #2a5a2a; }
 .kofi { background-color: #29abe0; }
 .kofi:hover { background-color: #39bbe0; }
-
-/* --- Canvas --- */
-#canvas-container {
-    flex-grow: 1;
-    position: relative;
-    overflow: hidden; /* Prevents scrollbars from appearing due to canvas artifacts */
-}
-canvas {
-    position: absolute;
-    top: 0;
-    left: 0;
-}
