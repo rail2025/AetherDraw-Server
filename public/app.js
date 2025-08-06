@@ -2,11 +2,7 @@
 // Global State & Page Management
 // =================================================================
 const state = {
-    pages: [{
-        name: "1",
-        drawables: [],
-        undoStack: [],
-    }],
+    pages: [],
     currentPageIndex: 0,
     pageClipboard: null,
     currentDrawMode: 'pen',
@@ -48,9 +44,38 @@ function switchPage(index) {
     }
 }
 
-function addPage() {
+function addPage(isDefault = false) {
     const newPageName = (state.pages.length + 1).toString();
-    state.pages.push({ name: newPageName, drawables: [], undoStack: [] });
+    const newPage = { name: newPageName, drawables: [], undoStack: [] };
+    if (isDefault) {
+        const { width, height } = canvasContainer.getBoundingClientRect();
+        const canvasCenter = { x: width / 2, y: height / 2 };
+        const radius = Math.min(width, height) * 0.40;
+        const waymarkSize = 30;
+
+        const waymarksToPreload = [
+            { id: 'WaymarkAImage', icon: 'A.png', angle: 3 * Math.PI / 2 },
+            { id: 'WaymarkBImage', icon: 'B.png', angle: 0 },
+            { id: 'WaymarkCImage', icon: 'C.png', angle: Math.PI / 2 },
+            { id: 'WaymarkDImage', icon: 'D.png', angle: Math.PI },
+            { id: 'Waymark1Image', icon: '1_waymark.png', angle: 5 * Math.PI / 4 },
+            { id: 'Waymark2Image', icon: '2_waymark.png', angle: 7 * Math.PI / 4 },
+            { id: 'Waymark3Image', icon: '3_waymark.png', angle: Math.PI / 4 },
+            { id: 'Waymark4Image', icon: '4_waymark.png', angle: 3 * Math.PI / 4 }
+        ];
+
+        waymarksToPreload.forEach(wm => {
+            const x = canvasCenter.x + radius * Math.cos(wm.angle);
+            const y = canvasCenter.y + radius * Math.sin(wm.angle);
+            newPage.drawables.push({
+                uniqueId: crypto.randomUUID(), objectDrawMode: 'icon', iconId: wm.id,
+                left: x - waymarkSize / 2, top: y - waymarkSize / 2,
+                width: waymarkSize, height: waymarkSize, angle: 0,
+                strokeWidth: 0, fill: 'transparent', stroke: 'transparent'
+            });
+        });
+    }
+    state.pages.push(newPage);
     switchPage(state.pages.length - 1);
 }
 
@@ -72,32 +97,53 @@ function copyPage() {
 function pastePage() {
     if (state.pageClipboard) {
         recordUndoState("Paste Page");
-        const currentPage = getCurrentPage();
-        currentPage.drawables = JSON.parse(JSON.stringify(state.pageClipboard.drawables));
+        getCurrentPage().drawables = JSON.parse(JSON.stringify(state.pageClipboard.drawables));
         renderAll();
     }
 }
-
 
 // =================================================================
 // Canvas Setup & Rendering
 // =================================================================
 const canvasContainer = document.getElementById('canvas-container');
-const canvas = new fabric.Canvas('canvas', { backgroundColor: '#333', selection: false });
+const canvas = new fabric.Canvas('canvas', { selection: false });
+
+function drawGrid() {
+    const gridSize = 40;
+    const { width, height } = canvas.getCanvasElement();
+    const lines = [];
+    for (let i = 0; i < (width / gridSize); i++) {
+        lines.push(new fabric.Line([i * gridSize, 0, i * gridSize, height], { stroke: '#404040', selectable: false }));
+    }
+    for (let i = 0; i < (height / gridSize); i++) {
+        lines.push(new fabric.Line([0, i * gridSize, width, i * gridSize], { stroke: '#404040', selectable: false }));
+    }
+    const gridGroup = new fabric.Group(lines, { selectable: false, evented: false });
+    canvas.add(gridGroup);
+    canvas.sendToBack(gridGroup);
+}
 
 function resizeCanvas() {
     const { width, height } = canvasContainer.getBoundingClientRect();
     canvas.setWidth(width);
     canvas.setHeight(height);
+    renderAll();
 }
+
 const resizeObserver = new ResizeObserver(resizeCanvas);
 resizeObserver.observe(canvasContainer);
-resizeCanvas();
+
+const iconUrlBase = '/icons/';
+const iconMap = {}; // Will be populated by createToolbar
 
 function renderAll() {
     const page = getCurrentPage();
     canvas.clear();
+    canvas.backgroundColor = '#262629';
+    drawGrid();
     if (!page) return;
+
+    const selectedIds = canvas.getActiveObjects().map(o => o.drawableId);
 
     page.drawables.forEach(drawable => {
         let fabricObject;
@@ -115,19 +161,29 @@ function renderAll() {
                 fabricObject = new fabric.Polyline(drawable.points, { ...commonProps, stroke: drawable.stroke, fill: null, strokeDashArray: drawable.objectDrawMode === 'dash' ? [drawable.thickness * 2.5, drawable.thickness * 1.25] : null });
                 break;
             case 'arrow':
-                 const line = new fabric.Line([drawable.x1, drawable.y1, drawable.x2, drawable.y2], { stroke: drawable.stroke, strokeWidth: drawable.strokeWidth });
-                 const angle = Math.atan2(drawable.y2 - drawable.y1, drawable.x2 - drawable.x1) * 180 / Math.PI;
-                 const arrowHead = new fabric.Triangle({ left: drawable.x2, top: drawable.y2, originX: 'center', originY: 'center', height: drawable.strokeWidth * 4, width: drawable.strokeWidth * 4, fill: drawable.stroke, angle: angle + 90 });
-                 fabricObject = new fabric.Group([line, arrowHead], { selectable: state.currentDrawMode === 'select', angle: drawable.angle, left: drawable.left, top: drawable.top });
+                const line = new fabric.Line([drawable.x1, drawable.y1, drawable.x2, drawable.y2], { stroke: drawable.stroke, strokeWidth: drawable.strokeWidth, originX: 'center', originY: 'center' });
+                const angle = Math.atan2(drawable.y2 - drawable.y1, drawable.x2 - drawable.x1) * 180 / Math.PI;
+                const arrowHead = new fabric.Triangle({ height: drawable.strokeWidth * 4, width: drawable.strokeWidth * 4, fill: drawable.stroke, angle: 90, originX: 'center', originY: 'center' });
+                fabricObject = new fabric.Group([line, arrowHead], { angle: angle, left: drawable.x2, top: drawable.y2, selectable: state.currentDrawMode === 'select', originX: 'center', originY: 'center' });
                 break;
             case 'icon':
-                fabric.loadSVGFromURL(drawable.iconUrl, (objects, options) => {
-                    const icon = fabric.util.groupSVGElements(objects, options);
-                    icon.set({ ...commonProps, left: drawable.left, top: drawable.top });
-                    icon.scaleToWidth(drawable.width);
-                    icon.drawableId = drawable.uniqueId;
-                    canvas.add(icon);
-                });
+                const iconPath = iconMap[drawable.iconId];
+                if (iconPath.endsWith('.svg')) {
+                    fabric.loadSVGFromURL(iconPath, (objects, options) => {
+                        const icon = fabric.util.groupSVGElements(objects, options);
+                        icon.set({ ...commonProps, left: drawable.left, top: drawable.top });
+                        icon.scaleToWidth(drawable.width);
+                        icon.drawableId = drawable.uniqueId;
+                        canvas.add(icon);
+                    });
+                } else {
+                     fabric.Image.fromURL(iconPath, (img) => {
+                        img.set({ ...commonProps, left: drawable.left, top: drawable.top });
+                        img.scaleToWidth(drawable.width);
+                        img.drawableId = drawable.uniqueId;
+                        canvas.add(img);
+                    });
+                }
                 return;
              case 'text':
                 fabricObject = new fabric.Textbox(drawable.text, { ...commonProps, left: drawable.left, top: drawable.top, width: 200, fontSize: 20, fill: drawable.stroke });
@@ -136,6 +192,9 @@ function renderAll() {
         if (fabricObject) {
             fabricObject.drawableId = drawable.uniqueId;
             canvas.add(fabricObject);
+            if (selectedIds.includes(drawable.uniqueId)) {
+                canvas.setActiveObject(fabricObject);
+            }
         }
     });
     canvas.renderAll();
@@ -187,7 +246,16 @@ canvas.on('mouse:move', (o) => {
 });
 
 canvas.on('mouse:up', () => {
-    if (!isDrawing) return;
+    if (isDrawing && ['pen', 'dash'].includes(state.currentDrawMode)) {
+        let polyline = canvas.getObjects().slice(-1)[0];
+        if (polyline) {
+            let drawable = getCurrentPage().drawables.find(d => d.uniqueId === polyline.drawableId);
+            if (drawable) {
+                drawable.left = polyline.left;
+                drawable.top = polyline.top;
+            }
+        }
+    }
     isDrawing = false;
     renderAll();
 });
@@ -198,13 +266,22 @@ canvas.on('object:modified', (e) => {
     const drawable = getCurrentPage().drawables.find(d => d.uniqueId === fabricObject.drawableId);
     if (!drawable) return;
 
-    drawable.left = fabricObject.left;
-    drawable.top = fabricObject.top;
-    drawable.angle = fabricObject.angle;
-    drawable.width = fabricObject.width * fabricObject.scaleX;
-    drawable.height = fabricObject.height * fabricObject.scaleY;
-    if (drawable.objectDrawMode === 'circle') {
-        drawable.radius = (fabricObject.radius * Math.max(fabricObject.scaleX, fabricObject.scaleY));
+    // For polylines, update all points
+    if (['pen', 'dash'].includes(drawable.objectDrawMode)) {
+        const newPoints = fabricObject.points.map(p => ({
+            x: p.x + fabricObject.left,
+            y: p.y + fabricObject.top,
+        }));
+        drawable.points = newPoints;
+    } else { // For other shapes
+        drawable.left = fabricObject.left;
+        drawable.top = fabricObject.top;
+        drawable.angle = fabricObject.angle;
+        drawable.width = fabricObject.width * fabricObject.scaleX;
+        drawable.height = fabricObject.height * fabricObject.scaleY;
+        if (drawable.objectDrawMode === 'circle') {
+            drawable.radius = (fabricObject.radius * Math.max(fabricObject.scaleX, fabricObject.scaleY));
+        }
     }
     fabricObject.set({ scaleX: 1, scaleY: 1 });
     renderAll();
@@ -214,7 +291,6 @@ canvas.on('object:modified', (e) => {
 // =================================================================
 // Toolbar & Icon Logic
 // =================================================================
-const iconUrlBase = '/icons/';
 const toolDefinitions = {
     'Drawing': [ { id: 'pen', name: 'Pen' }, { id: 'line', name: 'Line' }, { id: 'dash', name: 'Dash' }],
     'Shapes': [ { id: 'rectangle', name: 'Rect' }, { id: 'circle', name: 'Circle' }, { id: 'arrow', name: 'Arrow' }, { id: 'triangle', name: 'Triangle' }],
@@ -226,51 +302,55 @@ const toolDefinitions = {
     'Dots': [ { id: 'Dot1Image', name: 'Dot 1', icon: '1dot.svg' }, { id: 'Dot2Image', name: 'Dot 2', icon: '2dot.svg' }, { id: 'Dot3Image', name: 'Dot 3', icon: '3dot.svg' }, { id: 'Dot4Image', name: 'Dot 4', icon: '4dot.svg' }, { id: 'Dot5Image', name: 'Dot 5', icon: '5dot.svg' }, { id: 'Dot6Image', name: 'Dot 6', icon: '6dot.svg' }, { id: 'Dot7Image', name: 'Dot 7', icon: '7dot.svg' }, { id: 'Dot8Image', name: 'Dot 8', icon: '8dot.svg' }, ]
 };
 
-const toolGroupsGrid = document.getElementById('tool-groups-grid');
-
-for (const groupName in toolDefinitions) {
-    const groupData = toolDefinitions[groupName];
-    const groupDiv = document.createElement('div');
-    groupDiv.className = 'tool-group';
-    
-    const mainButton = document.createElement('button');
-    mainButton.id = `${groupName.toLowerCase()}-group`;
-    mainButton.className = 'tool-group-btn';
-    mainButton.innerHTML = groupData[0].icon ? `<img src="${iconUrlBase}${groupData[0].icon}" alt="${groupName}">` : groupData[0].name;
-    
-    const popup = document.createElement('div');
-    popup.className = 'tool-popup';
-
-    groupData.forEach(tool => {
-        const button = document.createElement('button');
-        button.id = tool.id;
-        button.className = 'tool-btn';
-        const imgHtml = tool.icon ? `<img src="${iconUrlBase}${tool.icon}" alt="${tool.name}" style="height: 20px; margin-right: 5px;">` : '';
-        button.innerHTML = `${imgHtml}${tool.name}`;
+function createToolbar() {
+    const toolGroupsGrid = document.getElementById('tool-groups-grid');
+    toolGroupsGrid.innerHTML = '';
+    for (const groupName in toolDefinitions) {
+        const groupData = toolDefinitions[groupName];
+        const groupDiv = document.createElement('div');
+        groupDiv.className = 'tool-group';
         
-        button.onclick = (e) => {
-            e.stopPropagation();
-            if (tool.icon) {
-                recordUndoState(`Add icon: ${tool.name}`);
-                const iconDrawable = {
-                    uniqueId: crypto.randomUUID(), objectDrawMode: 'icon', iconUrl: `${iconUrlBase}${tool.icon}`,
-                    left: canvas.width / 2 - 25, top: canvas.height / 2 - 25, width: 50, height: 50,
-                    angle: 0, strokeWidth: 0, fill: 'transparent', stroke: 'transparent'
-                };
-                getCurrentPage().drawables.push(iconDrawable);
-                renderAll();
-                setActiveTool('select');
-            } else {
-                setActiveTool(tool.id);
-            }
-            document.querySelectorAll('.tool-popup').forEach(p => p.classList.remove('active'));
-        };
-        popup.appendChild(button);
-    });
-    
-    groupDiv.appendChild(mainButton);
-    groupDiv.appendChild(popup);
-    toolGroupsGrid.appendChild(groupDiv);
+        const mainButton = document.createElement('button');
+        mainButton.id = `${groupName.toLowerCase()}-group`;
+        mainButton.className = 'tool-group-btn';
+        mainButton.innerHTML = groupData[0].icon ? `<img src="${iconUrlBase}${groupData[0].icon}" alt="${groupName}">` : groupData[0].name;
+        
+        const popup = document.createElement('div');
+        popup.className = 'tool-popup';
+
+        groupData.forEach(tool => {
+            if (tool.icon) iconMap[tool.id] = `${iconUrlBase}${tool.icon}`;
+            const button = document.createElement('button');
+            button.id = tool.id;
+            button.className = 'tool-btn';
+            const imgHtml = tool.icon ? `<img src="${iconUrlBase}${tool.icon}" alt="${tool.name}">` : '';
+            button.innerHTML = `${imgHtml}<span>${tool.name}</span>`;
+            
+            button.onclick = (e) => {
+                e.stopPropagation();
+                if (tool.icon) {
+                    recordUndoState(`Add icon: ${tool.name}`);
+                    getCurrentPage().drawables.push({
+                        uniqueId: crypto.randomUUID(), objectDrawMode: 'icon', iconId: tool.id,
+                        left: canvas.width / 2 - 25, top: canvas.height / 2 - 25,
+                        width: 50, height: 50, angle: 0,
+                        strokeWidth: 0, fill: 'transparent', stroke: 'transparent'
+                    });
+                    renderAll();
+                    setActiveTool('select');
+                } else {
+                    setActiveTool(tool.id);
+                }
+                document.querySelectorAll('.tool-popup').forEach(p => p.classList.remove('active'));
+            };
+            popup.appendChild(button);
+        });
+        
+        groupDiv.appendChild(mainButton);
+        groupDiv.appendChild(popup);
+        toolGroupsGrid.appendChild(groupDiv);
+    }
+    addEventListeners();
 }
 
 function setActiveTool(toolId) {
@@ -297,73 +377,76 @@ function setActiveTool(toolId) {
     canvas.discardActiveObject().renderAll();
 }
 
-document.querySelectorAll('.tool-group-btn').forEach(button => {
-    button.addEventListener('click', (e) => {
-        const popup = e.currentTarget.nextElementSibling;
-        if (!popup) return;
-        const isActive = popup.classList.contains('active');
-        document.querySelectorAll('.tool-popup').forEach(p => p.classList.remove('active'));
-        if (!isActive) popup.classList.add('active');
+function addEventListeners() {
+    document.querySelectorAll('.tool-group-btn').forEach(button => {
+        button.addEventListener('click', (e) => {
+            const popup = e.currentTarget.nextElementSibling;
+            if (!popup) return;
+            const isActive = popup.classList.contains('active');
+            document.querySelectorAll('.tool-popup').forEach(p => p.classList.remove('active'));
+            if (!isActive) popup.classList.add('active');
+        });
     });
-});
 
-document.querySelectorAll('#toolbar .tool-btn').forEach(button => {
-    if (!button.closest('.tool-popup')) {
+    document.querySelectorAll('#toolbar .tool-btn:not(.tool-popup .tool-btn)').forEach(button => {
         button.addEventListener('click', () => setActiveTool(button.id));
-    }
-});
-
-document.getElementById('text').addEventListener('click', () => {
-    recordUndoState('Add Text');
-    const textDrawable = {
-        uniqueId: crypto.randomUUID(), objectDrawMode: 'text',
-        left: canvas.width / 2 - 100, top: canvas.height / 2 - 20,
-        text: "New Text", angle: 0, stroke: state.brushColor, fill: state.brushColor,
-    };
-    getCurrentPage().drawables.push(textDrawable);
-    renderAll();
-    setActiveTool('select');
-});
-
-document.addEventListener('click', (e) => {
-    if (!e.target.closest('.tool-group')) {
-        document.querySelectorAll('.tool-popup').forEach(p => p.classList.remove('active'));
-    }
-});
-
-document.getElementById('undo').addEventListener('click', performUndo);
-document.getElementById('clear').addEventListener('click', clearCanvas);
-
-document.querySelectorAll('.preset-btn').forEach(button => {
-    button.addEventListener('click', (e) => {
-        document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
-        e.currentTarget.classList.add('active');
-        state.brushWidth = parseFloat(e.currentTarget.textContent);
-        canvas.freeDrawingBrush.width = state.brushWidth;
     });
-});
 
-const colorPalette = ['#FFFFFF', '#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#808080', '#C06000'];
-const paletteContainer = document.querySelector('.color-palette');
-colorPalette.forEach(color => {
-    const button = document.createElement('button');
-    button.style.backgroundColor = color;
-    button.addEventListener('click', (e) => {
-        document.querySelectorAll('.color-palette button').forEach(btn => btn.classList.remove('active'));
-        e.currentTarget.classList.add('active');
-        state.brushColor = color;
-        canvas.freeDrawingBrush.color = state.brushColor;
+    document.getElementById('text').addEventListener('click', () => {
+        recordUndoState('Add Text');
+        getCurrentPage().drawables.push({
+            uniqueId: crypto.randomUUID(), objectDrawMode: 'text',
+            left: canvas.width / 2 - 100, top: canvas.height / 2 - 20,
+            text: "New Text", angle: 0, stroke: state.brushColor, fill: state.brushColor,
+        });
+        renderAll();
+        setActiveTool('select');
     });
-    paletteContainer.appendChild(button);
-});
-document.querySelector('.color-palette button').click();
 
-document.getElementById('fill-switch').addEventListener('click', (e) => {
-    state.isShapeFilled = !state.isShapeFilled;
-    e.currentTarget.parentElement.classList.toggle('outline', !state.isShapeFilled);
-});
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.tool-group')) {
+            document.querySelectorAll('.tool-popup').forEach(p => p.classList.remove('active'));
+        }
+    });
 
-// Page Tab rendering
+    document.getElementById('undo').addEventListener('click', performUndo);
+    document.getElementById('clear').addEventListener('click', clearCanvas);
+
+    document.querySelectorAll('.preset-btn').forEach(button => {
+        button.addEventListener('click', (e) => {
+            document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
+            e.currentTarget.classList.add('active');
+            state.brushWidth = parseFloat(e.currentTarget.textContent);
+            canvas.freeDrawingBrush.width = state.brushWidth;
+        });
+    });
+
+    const colorPalette = ['#FFFFFF', '#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#808080', '#C06000'];
+    const paletteContainer = document.querySelector('.color-palette');
+    paletteContainer.innerHTML = '';
+    colorPalette.forEach(color => {
+        const button = document.createElement('button');
+        button.style.backgroundColor = color;
+        button.addEventListener('click', (e) => {
+            document.querySelectorAll('.color-palette button').forEach(btn => btn.classList.remove('active'));
+            e.currentTarget.classList.add('active');
+            state.brushColor = color;
+            canvas.freeDrawingBrush.color = state.brushColor;
+        });
+        paletteContainer.appendChild(button);
+    });
+    document.querySelector('.color-palette button').click();
+
+    document.getElementById('fill-switch').addEventListener('click', (e) => {
+        state.isShapeFilled = !state.isShapeFilled;
+        e.currentTarget.parentElement.classList.toggle('outline', !state.isShapeFilled);
+    });
+    
+    document.getElementById('load').onclick = () => alert('Load function not yet implemented.');
+    document.getElementById('save').onclick = () => alert('Save function not yet implemented.');
+    document.getElementById('live').onclick = () => alert('Live function not yet implemented.');
+}
+
 function renderPageTabs() {
     const tabsContainer = document.getElementById('page-tabs');
     tabsContainer.innerHTML = '';
@@ -377,7 +460,7 @@ function renderPageTabs() {
     
     const addButton = document.createElement('button');
     addButton.textContent = '+';
-    addButton.onclick = addPage;
+    addButton.onclick = () => addPage(false);
     tabsContainer.appendChild(addButton);
     
     const copyButton = document.createElement('button');
@@ -401,6 +484,6 @@ function renderPageTabs() {
 }
 
 // Initial Setup
+createToolbar();
+addPage(true); // Create the first page with default waymarks
 setActiveTool('pen');
-renderPageTabs();
-renderAll();
