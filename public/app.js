@@ -1,6 +1,7 @@
 // =================================================================
 // Global State & Page Management
 // =================================================================
+
 const state = {
   pages: [],
   currentPageIndex: 0,
@@ -110,12 +111,13 @@ function pastePage() {
 // =================================================================
 // Canvas Setup & Rendering
 // =================================================================
+
 const canvasContainer = document.getElementById('canvas-container');
 const canvas = new fabric.Canvas('canvas', { selection: false });
 
 function drawGrid() {
   const gridSize = 40;
-  // FIXED: Use getElement() and getBoundingClientRect instead of getCanvasElement()
+  // FIXED: Use getElement() not getCanvasElement()
   const { width, height } = canvas.getElement().getBoundingClientRect();
 
   const lines = [];
@@ -256,29 +258,212 @@ function renderAll() {
 // Drawing & Modification Event Logic
 // =================================================================
 
-// ... (mouse event handlers unchanged, same as your original)
+let isDrawing = false;
+let currentPath = null;
+let startPoint = null;
 
-canvas.on('object:modified', e => {
-  recordUndoState("Modify object");
-  // unchanged from your original...
+canvas.on('mouse:down', function (opt) {
+  if (state.currentDrawMode === 'select') return;
+  isDrawing = true;
+  const pointer = canvas.getPointer(opt.e);
+  startPoint = pointer;
+
+  switch (state.currentDrawMode) {
+    case 'pen':
+    case 'dash':
+    case 'line':
+      currentPath = new fabric.Polyline([pointer], {
+        stroke: state.brushColor,
+        strokeWidth: state.brushWidth,
+        fill: 'transparent',
+        selectable: false,
+        evented: false,
+        strokeDashArray: (state.currentDrawMode === 'dash') ? [state.brushWidth * 2.5, state.brushWidth * 1.25] : null
+      });
+      canvas.add(currentPath);
+      break;
+    case 'rectangle':
+      currentPath = new fabric.Rect({
+        left: pointer.x,
+        top: pointer.y,
+        width: 0,
+        height: 0,
+        stroke: state.brushColor,
+        strokeWidth: state.brushWidth,
+        fill: state.isShapeFilled ? state.brushColor : 'transparent',
+        selectable: false,
+        evented: false
+      });
+      canvas.add(currentPath);
+      break;
+    case 'circle':
+      currentPath = new fabric.Circle({
+        left: pointer.x,
+        top: pointer.y,
+        radius: 0,
+        stroke: state.brushColor,
+        strokeWidth: state.brushWidth,
+        fill: state.isShapeFilled ? state.brushColor : 'transparent',
+        selectable: false,
+        evented: false
+      });
+      canvas.add(currentPath);
+      break;
+    case 'triangle':
+      currentPath = new fabric.Triangle({
+        left: pointer.x,
+        top: pointer.y,
+        width: 0,
+        height: 0,
+        stroke: state.brushColor,
+        strokeWidth: state.brushWidth,
+        fill: state.isShapeFilled ? state.brushColor : 'transparent',
+        selectable: false,
+        evented: false
+      });
+      canvas.add(currentPath);
+      break;
+    case 'arrow':
+      currentPath = new fabric.Line([pointer.x, pointer.y, pointer.x, pointer.y], {
+        stroke: state.brushColor,
+        strokeWidth: state.brushWidth,
+        selectable: false,
+        evented: false
+      });
+      canvas.add(currentPath);
+      break;
+  }
+});
+
+canvas.on('mouse:move', function (opt) {
+  if (!isDrawing || !currentPath) return;
+  const pointer = canvas.getPointer(opt.e);
+
+  switch (state.currentDrawMode) {
+    case 'pen':
+    case 'dash':
+      currentPath.points.push({ x: pointer.x, y: pointer.y });
+      currentPath.set({ points: currentPath.points });
+      break;
+    case 'line':
+      currentPath.points = [startPoint, pointer];
+      currentPath.set({ points: currentPath.points });
+      break;
+    case 'rectangle':
+      currentPath.set({
+        width: Math.abs(pointer.x - startPoint.x),
+        height: Math.abs(pointer.y - startPoint.y),
+        left: Math.min(pointer.x, startPoint.x),
+        top: Math.min(pointer.y, startPoint.y)
+      });
+      break;
+    case 'circle':
+      const radius = Math.sqrt(Math.pow(pointer.x - startPoint.x, 2) + Math.pow(pointer.y - startPoint.y, 2)) / 2;
+      currentPath.set({
+        radius: radius,
+        left: startPoint.x - radius,
+        top: startPoint.y - radius
+      });
+      break;
+    case 'triangle':
+      currentPath.set({
+        width: Math.abs(pointer.x - startPoint.x),
+        height: Math.abs(pointer.y - startPoint.y),
+        left: Math.min(pointer.x, startPoint.x),
+        top: Math.min(pointer.y, startPoint.y)
+      });
+      break;
+    case 'arrow':
+      currentPath.set({ x2: pointer.x, y2: pointer.y });
+      break;
+  }
+  canvas.requestRenderAll();
+});
+
+canvas.on('mouse:up', function (opt) {
+  if (!isDrawing || !currentPath) return;
+  isDrawing = false;
+
+  // Add drawable to page data
+  const page = getCurrentPage();
+
+  switch (state.currentDrawMode) {
+    case 'pen':
+    case 'dash':
+    case 'line':
+      page.drawables.push({
+        uniqueId: crypto.randomUUID(),
+        objectDrawMode: state.currentDrawMode,
+        points: currentPath.points.map(p => ({ x: p.x, y: p.y })),
+        stroke: state.brushColor,
+        strokeWidth: state.brushWidth
+      });
+      break;
+    case 'rectangle':
+      page.drawables.push({
+        uniqueId: crypto.randomUUID(),
+        objectDrawMode: 'rectangle',
+        left: currentPath.left,
+        top: currentPath.top,
+        width: currentPath.width,
+        height: currentPath.height,
+        stroke: state.brushColor,
+        strokeWidth: state.brushWidth,
+        fill: state.isShapeFilled ? state.brushColor : 'transparent'
+      });
+      break;
+    case 'circle':
+      page.drawables.push({
+        uniqueId: crypto.randomUUID(),
+        objectDrawMode: 'circle',
+        left: currentPath.left,
+        top: currentPath.top,
+        radius: currentPath.radius,
+        stroke: state.brushColor,
+        strokeWidth: state.brushWidth,
+        fill: state.isShapeFilled ? state.brushColor : 'transparent'
+      });
+      break;
+    case 'triangle':
+      page.drawables.push({
+        uniqueId: crypto.randomUUID(),
+        objectDrawMode: 'triangle',
+        left: currentPath.left,
+        top: currentPath.top,
+        width: currentPath.width,
+        height: currentPath.height,
+        stroke: state.brushColor,
+        strokeWidth: state.brushWidth,
+        fill: state.isShapeFilled ? state.brushColor : 'transparent'
+      });
+      break;
+    case 'arrow':
+      page.drawables.push({
+        uniqueId: crypto.randomUUID(),
+        objectDrawMode: 'arrow',
+        x1: currentPath.x1,
+        y1: currentPath.y1,
+        x2: currentPath.x2,
+        y2: currentPath.y2,
+        stroke: state.brushColor,
+        strokeWidth: state.brushWidth
+      });
+      break;
+  }
+
+  canvas.remove(currentPath);
+  currentPath = null;
+  renderAll();
 });
 
 // =================================================================
-// Toolbar & Icon Logic
+// Tool Definitions & Icon Preload
 // =================================================================
-const iconUrlBase = '/icons/';
+
+const iconUrlBase = './icons/';
+const iconMap = {};
+
 const toolDefinitions = {
-  Drawing: [
-    { id: 'pen', name: 'Pen' },
-    { id: 'line', name: 'Line' },
-    { id: 'dash', name: 'Dash' }
-  ],
-  Shapes: [
-    { id: 'rectangle', name: 'Rect' },
-    { id: 'circle', name: 'Circle' },
-    { id: 'arrow', name: 'Arrow' },
-    { id: 'triangle', name: 'Triangle' }
-  ],
   Roles: [
     { id: 'HealerImage', name: 'Healer' },
     { id: 'MeleeImage', name: 'Melee' },
@@ -302,7 +487,7 @@ function preloadIcons() {
     let fileName = tool.id.replace('Image', '');
     let pngUrl = `${iconUrlBase}${fileName}.png`;
     let svgUrl = `${iconUrlBase}${fileName}.svg`;
-    iconMap[tool.id] = pngUrl; // or svgUrl if you prefer SVG
+    iconMap[tool.id] = pngUrl; // use PNG for now
   });
 }
 
@@ -330,11 +515,20 @@ function createToolbar() {
 
 function setActiveTool(toolId) {
   state.currentDrawMode = toolId;
-  // update UI etc.
+  // Update UI if needed
 }
 
 function renderPageTabs() {
-  // your existing tab rendering logic here
+  const pageTabs = document.getElementById('page-tabs');
+  pageTabs.innerHTML = '';
+
+  state.pages.forEach((page, idx) => {
+    const tab = document.createElement('button');
+    tab.textContent = page.name;
+    tab.className = (idx === state.currentPageIndex) ? 'active' : '';
+    tab.onclick = () => switchPage(idx);
+    pageTabs.appendChild(tab);
+  });
 }
 
 // =================================================================
@@ -346,6 +540,7 @@ window.addEventListener('load', () => {
   createToolbar();
   addPage(true);
   setActiveTool('pen');
+
   canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
   canvas.freeDrawingBrush.width = state.brushWidth;
   canvas.freeDrawingBrush.color = state.brushColor;
