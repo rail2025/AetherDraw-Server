@@ -24,7 +24,7 @@ const (
 	// To adjust the rate limit, change the number in rate.Limit(10).
 	rateLimit = rate.Limit(10) // 10 messages per second
 	// To adjust the burst allowance, change the number here.
-	burstSize = 20
+	burstSize = 60
 
 	// writeWait is the time allowed to write a message to the peer.
 	writeWait = 10 * time.Second
