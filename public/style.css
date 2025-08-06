@@ -28,6 +28,7 @@ body {
 #canvas-container {
     flex-grow: 1;
     position: relative;
+    background-color: #262629; /* Default grey background */
 }
 
 /* --- Bottom Bar --- */
@@ -48,12 +49,6 @@ body {
 #page-tabs button {
     padding: 0 10px;
     font-size: 12px;
-    background-color: #4a4a4a;
-    border: 1px solid #666;
-}
-#page-tabs button.active {
-    background-color: #0078d4;
-    border-color: #005a9e;
 }
 #page-tabs button.delete-btn {
     background-color: #8B0000;
@@ -91,7 +86,7 @@ button:hover { background-color: #5a5a5a; }
 button.active { background-color: #0078d4; border-color: #005a9e; }
 .full-width-btn { width: 100%; margin-top: 5px; }
 .tool-group-btn { height: 45px; width: 100%; text-transform: capitalize; }
-.tool-group-btn img, .tool-popup img { height: 24px; max-width: 100%; }
+.tool-group-btn img, .tool-popup img { height: 24px; max-width: 36px; object-fit: contain; }
 
 /* --- Tool Popups --- */
 .tool-group { position: relative; }
