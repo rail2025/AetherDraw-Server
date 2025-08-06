@@ -11,34 +11,41 @@
         <div class="tool-grid">
             <button id="select" class="tool-btn">Select</button>
             <button id="eraser" class="tool-btn">Eraser</button>
-            <button>Copy</button>
-            <button>Paste</button>
+            <button id="copy">Copy</button>
+            <button id="paste">Paste</button>
         </div>
-        <button class="full-width-btn">Undo</button>
-        <button class="full-width-btn">Clear All</button>
-        <button class="full-width-btn">Emoji</button>
-        <button class="full-width-btn">Set BG (URL)</button>
+        <button id="undo" class="full-width-btn">Undo</button>
+        <button id="clear" class="full-width-btn">Clear All</button>
 
         <hr class="separator">
 
         <div class="tool-grid">
-            <button id="pen" class="tool-group-btn tool-btn active">Pen</button>
-            <button id="rectangle" class="tool-group-btn tool-btn">Rect</button>
-            <button id="circle" class="tool-group-btn tool-btn">Circle</button>
-            <button id="triangle" class="tool-group-btn tool-btn">Triangle</button>
-            <button id="line" class="tool-group-btn tool-btn">Line</button>
-            <button id="arrow" class="tool-group-btn tool-btn">Arrow</button>
-            <button id="text" class="tool-group-btn tool-btn">Text</button>
-            <button id="placeholder1" class="tool-group-btn tool-btn">...</button>
-            <button id="placeholder2" class="tool-group-btn tool-btn">...</button>
-            <button id="placeholder3" class="tool-group-btn tool-btn">...</button>
+            <div class="tool-group">
+                <button id="pen-group" class="tool-group-btn" data-active-tool="pen">Pen</button>
+                <div class="tool-popup">
+                    <button id="pen" class="tool-btn">Pen</button>
+                    <button id="line" class="tool-btn">Line</button>
+                    <button id="dash" class="tool-btn">Dash</button>
+                </div>
+            </div>
+            <div class="tool-group">
+                <button id="shape-group" class="tool-group-btn" data-active-tool="rectangle">Rect</button>
+                <div class="tool-popup">
+                    <button id="rectangle" class="tool-btn">Rectangle</button>
+                    <button id="circle" class="tool-btn">Circle</button>
+                    <button id="arrow" class="tool-btn">Arrow</button>
+                    <button id="cone" class="tool-btn">Cone</button>
+                    <button id="triangle" class="tool-btn">Triangle</button>
+                </div>
+            </div>
         </div>
-
+        <button id="text" class="full-width-btn tool-btn">Text Tool</button>
+        
         <hr class="separator">
 
         <div class="fill-toggle">
             <span>Fill</span>
-            <div class="toggle-switch">
+            <div id="fill-switch" class="toggle-switch">
                 <div class="toggle-thumb"></div>
             </div>
             <span>Outline</span>
@@ -56,8 +63,7 @@
 
         <hr class="separator">
 
-        <div class="color-palette">
-            </div>
+        <div class="color-palette"></div>
         
         <div class="footer">
             <button class="full-width-btn footer-btn bug-report">Bug report/<br>Feature request</button>
@@ -70,6 +76,7 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <script src="serialization.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
