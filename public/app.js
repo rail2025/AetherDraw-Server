@@ -1,9 +1,14 @@
 // =================================================================
-// Global State & History
+// Global State & Page Management
 // =================================================================
 const state = {
-    drawables: [],
-    undoStack: [],
+    pages: [{
+        name: "1",
+        drawables: [],
+        undoStack: [],
+    }],
+    currentPageIndex: 0,
+    pageClipboard: null,
     currentDrawMode: 'pen',
     brushColor: '#FFFFFF',
     brushWidth: 4,
@@ -11,23 +16,68 @@ const state = {
 };
 const MAX_UNDO_LEVELS = 30;
 
+function getCurrentPage() {
+    return state.pages[state.currentPageIndex];
+}
+
 function recordUndoState(actionDescription) {
-    if (state.undoStack.length >= MAX_UNDO_LEVELS) state.undoStack.shift();
-    state.undoStack.push(JSON.parse(JSON.stringify(state.drawables)));
+    const page = getCurrentPage();
+    if (page.undoStack.length >= MAX_UNDO_LEVELS) page.undoStack.shift();
+    page.undoStack.push(JSON.parse(JSON.stringify(page.drawables)));
 }
 
 function performUndo() {
-    if (state.undoStack.length > 0) {
-        state.drawables = state.undoStack.pop();
+    const page = getCurrentPage();
+    if (page.undoStack.length > 0) {
+        page.drawables = page.undoStack.pop();
         renderAll();
     }
 }
 
 function clearCanvas() {
     recordUndoState("Clear All");
-    state.drawables = [];
+    getCurrentPage().drawables = [];
     renderAll();
 }
+
+function switchPage(index) {
+    if (index >= 0 && index < state.pages.length) {
+        state.currentPageIndex = index;
+        renderAll();
+        renderPageTabs();
+    }
+}
+
+function addPage() {
+    const newPageName = (state.pages.length + 1).toString();
+    state.pages.push({ name: newPageName, drawables: [], undoStack: [] });
+    switchPage(state.pages.length - 1);
+}
+
+function deletePage(index) {
+    if (state.pages.length > 1) {
+        state.pages.splice(index, 1);
+        if (state.currentPageIndex >= state.pages.length) {
+            state.currentPageIndex = state.pages.length - 1;
+        }
+        switchPage(state.currentPageIndex);
+    }
+}
+
+function copyPage() {
+    state.pageClipboard = JSON.parse(JSON.stringify(getCurrentPage()));
+    renderPageTabs();
+}
+
+function pastePage() {
+    if (state.pageClipboard) {
+        recordUndoState("Paste Page");
+        const currentPage = getCurrentPage();
+        currentPage.drawables = JSON.parse(JSON.stringify(state.pageClipboard.drawables));
+        renderAll();
+    }
+}
+
 
 // =================================================================
 // Canvas Setup & Rendering
@@ -45,54 +95,30 @@ resizeObserver.observe(canvasContainer);
 resizeCanvas();
 
 function renderAll() {
-    const selectedIds = canvas.getActiveObjects().map(o => o.drawableId);
+    const page = getCurrentPage();
     canvas.clear();
-    state.drawables.forEach(drawable => {
+    if (!page) return;
+
+    page.drawables.forEach(drawable => {
         let fabricObject;
         const commonProps = {
-            stroke: drawable.stroke,
-            strokeWidth: drawable.strokeWidth,
-            fill: drawable.fill,
-            angle: drawable.angle,
-            selectable: state.currentDrawMode === 'select',
-            originX: 'left',
-            originY: 'top',
+            stroke: drawable.stroke, strokeWidth: drawable.strokeWidth, fill: drawable.fill,
+            angle: drawable.angle, selectable: state.currentDrawMode === 'select',
+            originX: 'left', originY: 'top',
         };
 
         switch (drawable.objectDrawMode) {
-            case 'rectangle':
-                fabricObject = new fabric.Rect({ ...commonProps, left: drawable.left, top: drawable.top, width: drawable.width, height: drawable.height });
-                break;
-            case 'circle':
-                fabricObject = new fabric.Circle({ ...commonProps, left: drawable.left, top: drawable.top, radius: drawable.radius });
-                break;
-            case 'triangle':
-                fabricObject = new fabric.Triangle({ ...commonProps, left: drawable.left, top: drawable.top, width: drawable.width, height: drawable.height });
-                break;
-            case 'line':
-            case 'pen':
-            case 'dash':
-                fabricObject = new fabric.Polyline(drawable.points, {
-                    ...commonProps,
-                    stroke: drawable.stroke,
-                    fill: null,
-                    strokeDashArray: drawable.objectDrawMode === 'dash' ? [drawable.thickness * 2.5, drawable.thickness * 1.25] : null,
-                });
+            case 'rectangle': fabricObject = new fabric.Rect({ ...commonProps, left: drawable.left, top: drawable.top, width: drawable.width, height: drawable.height }); break;
+            case 'circle': fabricObject = new fabric.Circle({ ...commonProps, left: drawable.left, top: drawable.top, radius: drawable.radius }); break;
+            case 'triangle': fabricObject = new fabric.Triangle({ ...commonProps, left: drawable.left, top: drawable.top, width: drawable.width, height: drawable.height }); break;
+            case 'line': case 'pen': case 'dash':
+                fabricObject = new fabric.Polyline(drawable.points, { ...commonProps, stroke: drawable.stroke, fill: null, strokeDashArray: drawable.objectDrawMode === 'dash' ? [drawable.thickness * 2.5, drawable.thickness * 1.25] : null });
                 break;
             case 'arrow':
-                const line = new fabric.Line([drawable.x1, drawable.y1, drawable.x2, drawable.y2], { stroke: drawable.stroke, strokeWidth: drawable.strokeWidth });
-                const angle = Math.atan2(drawable.y2 - drawable.y1, drawable.x2 - drawable.x1) * 180 / Math.PI;
-                const arrowHead = new fabric.Triangle({
-                    left: drawable.x2,
-                    top: drawable.y2,
-                    originX: 'center',
-                    originY: 'center',
-                    height: drawable.strokeWidth * 4,
-                    width: drawable.strokeWidth * 4,
-                    fill: drawable.stroke,
-                    angle: angle + 90,
-                });
-                fabricObject = new fabric.Group([line, arrowHead], { selectable: state.currentDrawMode === 'select', angle: drawable.angle, left: drawable.left, top: drawable.top });
+                 const line = new fabric.Line([drawable.x1, drawable.y1, drawable.x2, drawable.y2], { stroke: drawable.stroke, strokeWidth: drawable.strokeWidth });
+                 const angle = Math.atan2(drawable.y2 - drawable.y1, drawable.x2 - drawable.x1) * 180 / Math.PI;
+                 const arrowHead = new fabric.Triangle({ left: drawable.x2, top: drawable.y2, originX: 'center', originY: 'center', height: drawable.strokeWidth * 4, width: drawable.strokeWidth * 4, fill: drawable.stroke, angle: angle + 90 });
+                 fabricObject = new fabric.Group([line, arrowHead], { selectable: state.currentDrawMode === 'select', angle: drawable.angle, left: drawable.left, top: drawable.top });
                 break;
             case 'icon':
                 fabric.loadSVGFromURL(drawable.iconUrl, (objects, options) => {
@@ -104,22 +130,12 @@ function renderAll() {
                 });
                 return;
              case 'text':
-                fabricObject = new fabric.Textbox(drawable.text, {
-                    ...commonProps,
-                    left: drawable.left,
-                    top: drawable.top,
-                    width: 200,
-                    fontSize: 20,
-                    fill: drawable.stroke,
-                });
+                fabricObject = new fabric.Textbox(drawable.text, { ...commonProps, left: drawable.left, top: drawable.top, width: 200, fontSize: 20, fill: drawable.stroke });
                 break;
         }
         if (fabricObject) {
             fabricObject.drawableId = drawable.uniqueId;
             canvas.add(fabricObject);
-            if (selectedIds.includes(drawable.uniqueId)) {
-                canvas.setActiveObject(fabricObject);
-            }
         }
     });
     canvas.renderAll();
@@ -136,47 +152,23 @@ canvas.on('mouse:down', (o) => {
     recordUndoState(`Start drawing ${state.currentDrawMode}`);
     isDrawing = true;
     startPoint = canvas.getPointer(o.e);
-
-    const commonDrawableProps = {
-        uniqueId: crypto.randomUUID(),
-        objectDrawMode: state.currentDrawMode,
-        thickness: state.brushWidth,
-        isFilled: state.isShapeFilled,
+    const newDrawable = {
+        uniqueId: crypto.randomUUID(), objectDrawMode: state.currentDrawMode,
+        thickness: state.brushWidth, isFilled: state.isShapeFilled,
         fill: state.isShapeFilled ? state.brushColor + '66' : 'transparent',
-        stroke: state.brushColor,
-        strokeWidth: state.brushWidth,
-        angle: 0,
+        stroke: state.brushColor, strokeWidth: state.brushWidth, angle: 0,
+        points: [{ x: startPoint.x, y: startPoint.y }],
+        left: startPoint.x, top: startPoint.y, width: 0, height: 0, radius: 0,
+        x1: startPoint.x, y1: startPoint.y, x2: startPoint.x, y2: startPoint.y,
     };
-
-    let newDrawable;
-    switch (state.currentDrawMode) {
-        case 'rectangle':
-        case 'triangle':
-            newDrawable = { ...commonDrawableProps, left: startPoint.x, top: startPoint.y, width: 0, height: 0 };
-            break;
-        case 'circle':
-            newDrawable = { ...commonDrawableProps, left: startPoint.x, top: startPoint.y, radius: 0 };
-            break;
-        case 'line':
-        case 'arrow':
-            newDrawable = { ...commonDrawableProps, x1: startPoint.x, y1: startPoint.y, x2: startPoint.x, y2: startPoint.y };
-            break;
-        case 'pen':
-        case 'dash':
-            newDrawable = { ...commonDrawableProps, points: [{ x: startPoint.x, y: startPoint.y }] };
-            break;
-    }
-
-    if (newDrawable) {
-        state.drawables.push(newDrawable);
-    }
+    getCurrentPage().drawables.push(newDrawable);
 });
 
 canvas.on('mouse:move', (o) => {
     if (!isDrawing) return;
     const pointer = canvas.getPointer(o.e);
-    let currentDrawable = state.drawables[state.drawables.length - 1];
-
+    let currentDrawable = getCurrentPage().drawables.slice(-1)[0];
+    
     if (['pen', 'dash'].includes(state.currentDrawMode)) {
         currentDrawable.points.push({ x: pointer.x, y: pointer.y });
     } else {
@@ -184,7 +176,6 @@ canvas.on('mouse:move', (o) => {
         currentDrawable.top = Math.min(pointer.y, startPoint.y);
         currentDrawable.width = Math.abs(pointer.x - startPoint.x);
         currentDrawable.height = Math.abs(pointer.y - startPoint.y);
-
         if (currentDrawable.objectDrawMode === 'circle') {
             currentDrawable.radius = Math.sqrt(Math.pow(currentDrawable.width, 2) + Math.pow(currentDrawable.height, 2)) / 2;
         } else if (['line', 'arrow'].includes(currentDrawable.objectDrawMode)) {
@@ -204,7 +195,7 @@ canvas.on('mouse:up', () => {
 canvas.on('object:modified', (e) => {
     recordUndoState("Modify object");
     const fabricObject = e.target;
-    const drawable = state.drawables.find(d => d.uniqueId === fabricObject.drawableId);
+    const drawable = getCurrentPage().drawables.find(d => d.uniqueId === fabricObject.drawableId);
     if (!drawable) return;
 
     drawable.left = fabricObject.left;
@@ -225,58 +216,14 @@ canvas.on('object:modified', (e) => {
 // =================================================================
 const iconUrlBase = '/icons/';
 const toolDefinitions = {
-    'Drawing': [
-        { id: 'pen', name: 'Pen' },
-        { id: 'line', name: 'Line' },
-        { id: 'dash', name: 'Dash' },
-    ],
-    'Shapes': [
-        { id: 'rectangle', name: 'Rect' },
-        { id: 'circle', name: 'Circle' },
-        { id: 'arrow', name: 'Arrow' },
-        { id: 'triangle', name: 'Triangle' },
-    ],
-    'Roles': [
-        { id: 'RoleTankImage', name: 'Tank', icon: 'Tank.JPG' },
-        { id: 'RoleHealerImage', name: 'Healer', icon: 'Healer.JPG' },
-        { id: 'RoleMeleeImage', name: 'Melee', icon: 'Melee.JPG' },
-        { id: 'RoleRangedImage', name: 'Ranged', icon: 'Ranged.JPG' },
-    ],
-    'Party': [
-        { id: 'Party1Image', name: '1', icon: 'Party1.png' },
-        { id: 'Party2Image', name: '2', icon: 'Party2.png' },
-        { id: 'Party3Image', name: '3', icon: 'Party3.png' },
-        { id: 'Party4Image', name: '4', icon: 'Party4.png' },
-        { id: 'Party5Image', name: '5', icon: 'Party5.png' },
-        { id: 'Party6Image', name: '6', icon: 'Party6.png' },
-        { id: 'Party7Image', name: '7', icon: 'Party7.png' },
-        { id: 'Party8Image', name: '8', icon: 'Party8.png' },
-    ],
-    'Waymarks': [
-        { id: 'WaymarkAImage', name: 'A', icon: 'A.png' },
-        { id: 'WaymarkBImage', name: 'B', icon: 'B.png' },
-        { id: 'WaymarkCImage', name: 'C', icon: 'C.png' },
-        { id: 'WaymarkDImage', name: 'D', icon: 'D.png' },
-    ],
-    'Numbers': [
-        { id: 'Waymark1Image', name: '1', icon: '1_waymark.png' },
-        { id: 'Waymark2Image', name: '2', icon: '2_waymark.png' },
-        { id: 'Waymark3Image', name: '3', icon: '3_waymark.png' },
-        { id: 'Waymark4Image', name: '4', icon: '4_waymark.png' },
-    ],
-    'Mechanics': [
-        { id: 'StackImage', name: 'Stack', icon: 'stack.svg' },
-        { id: 'SpreadImage', name: 'Spread', icon: 'spread.svg' },
-        { id: 'LineStackImage', name: 'Line Stack', icon: 'line_stack.svg' },
-        { id: 'DonutAoEImage', name: 'Donut', icon: 'donut.svg' },
-        { id: 'FlareImage', name: 'Flare', icon: 'flare.svg' },
-        { id: 'CircleAoEImage', name: 'AoE', icon: 'prox_aoe.svg' },
-        { id: 'BossImage', name: 'Boss', icon: 'boss.svg' },
-    ],
-    'Dots': [
-        { id: 'Dot1Image', name: 'Dot 1', icon: '1dot.svg' },
-        { id: 'Dot2Image', name: 'Dot 2', icon: '2dot.svg' },
-    ]
+    'Drawing': [ { id: 'pen', name: 'Pen' }, { id: 'line', name: 'Line' }, { id: 'dash', name: 'Dash' }],
+    'Shapes': [ { id: 'rectangle', name: 'Rect' }, { id: 'circle', name: 'Circle' }, { id: 'arrow', name: 'Arrow' }, { id: 'triangle', name: 'Triangle' }],
+    'Roles': [ { id: 'RoleTankImage', name: 'Tank', icon: 'Tank.JPG' }, { id: 'RoleHealerImage', name: 'Healer', icon: 'Healer.JPG' }, { id: 'RoleMeleeImage', name: 'Melee', icon: 'Melee.JPG' }, { id: 'RoleRangedImage', name: 'Ranged', icon: 'Ranged.JPG' }, ],
+    'Party': [ { id: 'Party1Image', name: '1', icon: 'Party1.png' }, { id: 'Party2Image', name: '2', icon: 'Party2.png' }, { id: 'Party3Image', name: '3', icon: 'Party3.png' }, { id: 'Party4Image', name: '4', icon: 'Party4.png' }, { id: 'Party5Image', name: '5', icon: 'Party5.png' }, { id: 'Party6Image', name: '6', icon: 'Party6.png' }, { id: 'Party7Image', name: '7', icon: 'Party7.png' }, { id: 'Party8Image', name: '8', icon: 'Party8.png' }, ],
+    'Waymarks': [ { id: 'WaymarkAImage', name: 'A', icon: 'A.png' }, { id: 'WaymarkBImage', name: 'B', icon: 'B.png' }, { id: 'WaymarkCImage', name: 'C', icon: 'C.png' }, { id: 'WaymarkDImage', name: 'D', icon: 'D.png' }, ],
+    'Numbers': [ { id: 'Waymark1Image', name: '1', icon: '1_waymark.png' }, { id: 'Waymark2Image', name: '2', icon: '2_waymark.png' }, { id: 'Waymark3Image', name: '3', icon: '3_waymark.png' }, { id: 'Waymark4Image', name: '4', icon: '4_waymark.png' }, ],
+    'Mechanics': [ { id: 'StackImage', name: 'Stack', icon: 'stack.svg' }, { id: 'SpreadImage', name: 'Spread', icon: 'spread.svg' }, { id: 'LineStackImage', name: 'Line Stack', icon: 'line_stack.svg' }, { id: 'DonutAoEImage', name: 'Donut', icon: 'donut.svg' }, { id: 'FlareImage', name: 'Flare', icon: 'flare.svg' }, { id: 'CircleAoEImage', name: 'AoE', icon: 'prox_aoe.svg' }, { id: 'BossImage', name: 'Boss', icon: 'boss.svg' }, ],
+    'Dots': [ { id: 'Dot1Image', name: 'Dot 1', icon: '1dot.svg' }, { id: 'Dot2Image', name: 'Dot 2', icon: '2dot.svg' }, { id: 'Dot3Image', name: 'Dot 3', icon: '3dot.svg' }, { id: 'Dot4Image', name: 'Dot 4', icon: '4dot.svg' }, { id: 'Dot5Image', name: 'Dot 5', icon: '5dot.svg' }, { id: 'Dot6Image', name: 'Dot 6', icon: '6dot.svg' }, { id: 'Dot7Image', name: 'Dot 7', icon: '7dot.svg' }, { id: 'Dot8Image', name: 'Dot 8', icon: '8dot.svg' }, ]
 };
 
 const toolGroupsGrid = document.getElementById('tool-groups-grid');
@@ -310,7 +257,7 @@ for (const groupName in toolDefinitions) {
                     left: canvas.width / 2 - 25, top: canvas.height / 2 - 25, width: 50, height: 50,
                     angle: 0, strokeWidth: 0, fill: 'transparent', stroke: 'transparent'
                 };
-                state.drawables.push(iconDrawable);
+                getCurrentPage().drawables.push(iconDrawable);
                 renderAll();
                 setActiveTool('select');
             } else {
@@ -360,8 +307,10 @@ document.querySelectorAll('.tool-group-btn').forEach(button => {
     });
 });
 
-document.querySelectorAll('#toolbar > .tool-grid > .tool-btn, #text').forEach(button => {
-    button.addEventListener('click', () => setActiveTool(button.id));
+document.querySelectorAll('#toolbar .tool-btn').forEach(button => {
+    if (!button.closest('.tool-popup')) {
+        button.addEventListener('click', () => setActiveTool(button.id));
+    }
 });
 
 document.getElementById('text').addEventListener('click', () => {
@@ -371,7 +320,7 @@ document.getElementById('text').addEventListener('click', () => {
         left: canvas.width / 2 - 100, top: canvas.height / 2 - 20,
         text: "New Text", angle: 0, stroke: state.brushColor, fill: state.brushColor,
     };
-    state.drawables.push(textDrawable);
+    getCurrentPage().drawables.push(textDrawable);
     renderAll();
     setActiveTool('select');
 });
@@ -414,5 +363,44 @@ document.getElementById('fill-switch').addEventListener('click', (e) => {
     e.currentTarget.parentElement.classList.toggle('outline', !state.isShapeFilled);
 });
 
-// Set initial tool
+// Page Tab rendering
+function renderPageTabs() {
+    const tabsContainer = document.getElementById('page-tabs');
+    tabsContainer.innerHTML = '';
+    state.pages.forEach((page, index) => {
+        const button = document.createElement('button');
+        button.textContent = page.name;
+        if (index === state.currentPageIndex) button.classList.add('active');
+        button.onclick = () => switchPage(index);
+        tabsContainer.appendChild(button);
+    });
+    
+    const addButton = document.createElement('button');
+    addButton.textContent = '+';
+    addButton.onclick = addPage;
+    tabsContainer.appendChild(addButton);
+    
+    const copyButton = document.createElement('button');
+    copyButton.textContent = 'Copy';
+    copyButton.onclick = copyPage;
+    tabsContainer.appendChild(copyButton);
+
+    const pasteButton = document.createElement('button');
+    pasteButton.textContent = 'Paste';
+    pasteButton.onclick = pastePage;
+    pasteButton.disabled = !state.pageClipboard;
+    tabsContainer.appendChild(pasteButton);
+
+    if (state.pages.length > 1) {
+        const deleteButton = document.createElement('button');
+        deleteButton.textContent = 'X';
+        deleteButton.className = 'delete-btn';
+        deleteButton.onclick = () => deletePage(state.currentPageIndex);
+        tabsContainer.appendChild(deleteButton);
+    }
+}
+
+// Initial Setup
 setActiveTool('pen');
+renderPageTabs();
+renderAll();
