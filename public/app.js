@@ -125,8 +125,7 @@ function resizeCanvas() {
     canvas.setHeight(height);
     renderAll();
 }
-
-const resizeObserver = new ResizeObserver(resizeCanvas);
+const resizeObserver = new ResizeObserver(resizeCanvas, { box: 'border-box' });
 resizeObserver.observe(canvasContainer);
 
 const iconMap = {};
@@ -151,10 +150,8 @@ function renderAll() {
             case 'circle': fabricObject = new fabric.Circle({ ...commonProps, left: drawable.left, top: drawable.top, radius: drawable.radius }); break;
             case 'triangle': fabricObject = new fabric.Triangle({ ...commonProps, left: drawable.left, top: drawable.top, width: drawable.width, height: drawable.height }); break;
             case 'pen': case 'dash':
-                fabricObject = new fabric.Polyline(drawable.points, { ...commonProps, stroke: drawable.stroke, fill: null, strokeDashArray: drawable.objectDrawMode === 'dash' ? [drawable.thickness * 2.5, drawable.thickness * 1.25] : null });
-                break;
             case 'line':
-                fabricObject = new fabric.Line([drawable.points[0].x, drawable.points[0].y, drawable.points[1].x, drawable.points[1].y], { ...commonProps, stroke: drawable.stroke });
+                fabricObject = new fabric.Polyline(drawable.points, { ...commonProps, stroke: drawable.stroke, fill: null, strokeDashArray: drawable.objectDrawMode === 'dash' ? [drawable.thickness * 2.5, drawable.thickness * 1.25] : null });
                 break;
             case 'arrow':
                 const line = new fabric.Line([drawable.x1, drawable.y1, drawable.x2, drawable.y2], { stroke: drawable.stroke, strokeWidth: drawable.strokeWidth, originX: 'center', originY: 'center' });
@@ -167,8 +164,8 @@ function renderAll() {
                 if (!iconPath) return;
                 const isSvg = iconPath.endsWith('.svg');
                 const loader = isSvg ? fabric.loadSVGFromURL : fabric.Image.fromURL;
-                loader(iconPath, (obj) => {
-                    const icon = isSvg ? fabric.util.groupSVGElements(obj) : obj;
+                loader(iconPath, (obj, options) => {
+                    const icon = isSvg ? fabric.util.groupSVGElements(obj, options) : obj;
                     icon.set({ ...commonProps, left: drawable.left, top: drawable.top });
                     icon.scaleToWidth(drawable.width);
                     icon.drawableId = drawable.uniqueId;
@@ -207,14 +204,10 @@ canvas.on('mouse:down', (o) => {
     };
     let newDrawable;
     switch (state.currentDrawMode) {
-        case 'rectangle': case 'triangle':
-            newDrawable = { ...commonDrawableProps, left: startPoint.x, top: startPoint.y, width: 0, height: 0 }; break;
-        case 'circle':
-            newDrawable = { ...commonDrawableProps, left: startPoint.x, top: startPoint.y, radius: 0 }; break;
-        case 'arrow':
-            newDrawable = { ...commonDrawableProps, x1: startPoint.x, y1: startPoint.y, x2: startPoint.x, y2: startPoint.y }; break;
-        case 'pen': case 'dash': case 'line':
-            newDrawable = { ...commonDrawableProps, points: [{ x: startPoint.x, y: startPoint.y }, { x: startPoint.x, y: startPoint.y }] }; break;
+        case 'rectangle': case 'triangle': newDrawable = { ...commonDrawableProps, left: startPoint.x, top: startPoint.y, width: 0, height: 0 }; break;
+        case 'circle': newDrawable = { ...commonDrawableProps, left: startPoint.x, top: startPoint.y, radius: 0 }; break;
+        case 'arrow': newDrawable = { ...commonDrawableProps, x1: startPoint.x, y1: startPoint.y, x2: startPoint.x, y2: startPoint.y }; break;
+        case 'pen': case 'dash': case 'line': newDrawable = { ...commonDrawableProps, points: [{ x: startPoint.x, y: startPoint.y }, { x: startPoint.x, y: startPoint.y }] }; break;
     }
     if (newDrawable) {
         getCurrentPage().drawables.push(newDrawable);
@@ -248,11 +241,11 @@ canvas.on('mouse:up', () => {
     if (!isDrawing) return;
     isDrawing = false;
     let drawable = getCurrentPage().drawables.slice(-1)[0];
-    if (['pen', 'dash'].includes(drawable.objectDrawMode)) {
+    if (drawable && ['pen', 'dash', 'line'].includes(drawable.objectDrawMode)) {
         const fabricObject = new fabric.Polyline(drawable.points);
         drawable.left = fabricObject.left;
         drawable.top = fabricObject.top;
-        drawable.points = fabricObject.points.map(p => ({ x: p.x - fabricObject.left, y: p.y - fabricObject.top }));
+        drawable.points = fabricObject.points.map(p => ({ x: p.x + fabricObject.left, y: p.y + fabricObject.top }));
     }
     renderAll();
 });
@@ -263,7 +256,7 @@ canvas.on('object:modified', (e) => {
     const drawable = getCurrentPage().drawables.find(d => d.uniqueId === fabricObject.drawableId);
     if (!drawable) return;
 
-    if (['pen', 'dash'].includes(drawable.objectDrawMode)) {
+    if (['pen', 'dash', 'line'].includes(drawable.objectDrawMode)) {
         drawable.points = fabricObject.points.map(p => ({ x: p.x + fabricObject.left, y: p.y + fabricObject.top }));
     } else {
         drawable.left = fabricObject.left;
@@ -278,6 +271,7 @@ canvas.on('object:modified', (e) => {
     fabricObject.set({ scaleX: 1, scaleY: 1 });
     renderAll();
 });
+
 
 // =================================================================
 // Toolbar & Icon Logic
@@ -348,8 +342,10 @@ function createToolbar() {
 function setActiveTool(toolId) {
     state.currentDrawMode = toolId;
     document.querySelectorAll('.tool-btn, .tool-group-btn').forEach(btn => btn.classList.remove('active'));
+    
     const clickedButton = document.getElementById(toolId);
     if (!clickedButton) return;
+    
     const groupButton = clickedButton.closest('.tool-group')?.querySelector('.tool-group-btn');
 
     if (groupButton) {
@@ -372,4 +368,108 @@ function addEventListeners() {
         button.addEventListener('click', (e) => {
             const popup = e.currentTarget.nextElementSibling;
             if (!popup) return;
-            const isActive
+            const isActive = popup.classList.contains('active');
+            document.querySelectorAll('.tool-popup').forEach(p => p.classList.remove('active'));
+            if (!isActive) popup.classList.add('active');
+        });
+    });
+
+    document.querySelectorAll('#toolbar .tool-btn:not(.tool-popup .tool-btn)').forEach(button => {
+        button.addEventListener('click', () => setActiveTool(button.id));
+    });
+
+    document.getElementById('text').addEventListener('click', () => {
+        recordUndoState('Add Text');
+        getCurrentPage().drawables.push({
+            uniqueId: crypto.randomUUID(), objectDrawMode: 'text',
+            left: canvas.width / 2 - 100, top: canvas.height / 2 - 20,
+            text: "New Text", angle: 0, stroke: state.brushColor, fill: state.brushColor,
+        });
+        renderAll();
+        setActiveTool('select');
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.tool-group')) {
+            document.querySelectorAll('.tool-popup').forEach(p => p.classList.remove('active'));
+        }
+    });
+
+    document.getElementById('undo').addEventListener('click', performUndo);
+    document.getElementById('clear').addEventListener('click', clearCanvas);
+
+    document.querySelectorAll('.preset-btn').forEach(button => {
+        button.addEventListener('click', (e) => {
+            document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
+            e.currentTarget.classList.add('active');
+            state.brushWidth = parseFloat(e.currentTarget.textContent);
+            canvas.freeDrawingBrush.width = state.brushWidth;
+        });
+    });
+
+    const colorPalette = ['#FFFFFF', '#000000', '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#808080', '#C06000'];
+    const paletteContainer = document.querySelector('.color-palette');
+    paletteContainer.innerHTML = '';
+    colorPalette.forEach(color => {
+        const button = document.createElement('button');
+        button.style.backgroundColor = color;
+        button.addEventListener('click', (e) => {
+            document.querySelectorAll('.color-palette button').forEach(btn => btn.classList.remove('active'));
+            e.currentTarget.classList.add('active');
+            state.brushColor = color;
+            canvas.freeDrawingBrush.color = state.brushColor;
+        });
+        paletteContainer.appendChild(button);
+    });
+    document.querySelector('.color-palette button').click();
+
+    document.getElementById('fill-switch').addEventListener('click', (e) => {
+        state.isShapeFilled = !state.isShapeFilled;
+        e.currentTarget.parentElement.classList.toggle('outline', !state.isShapeFilled);
+    });
+    
+    document.getElementById('load').onclick = () => alert('Load function not yet implemented.');
+    document.getElementById('save').onclick = () => alert('Save function not yet implemented.');
+    document.getElementById('live').onclick = () => alert('Live function not yet implemented.');
+}
+
+function renderPageTabs() {
+    const tabsContainer = document.getElementById('page-tabs');
+    tabsContainer.innerHTML = '';
+    state.pages.forEach((page, index) => {
+        const button = document.createElement('button');
+        button.textContent = page.name;
+        if (index === state.currentPageIndex) button.classList.add('active');
+        button.onclick = () => switchPage(index);
+        tabsContainer.appendChild(button);
+    });
+    
+    const addButton = document.createElement('button');
+    addButton.textContent = '+';
+    addButton.onclick = () => addPage(false);
+    tabsContainer.appendChild(addButton);
+    
+    const copyButton = document.createElement('button');
+    copyButton.textContent = 'Copy';
+    copyButton.onclick = copyPage;
+    tabsContainer.appendChild(copyButton);
+
+    const pasteButton = document.createElement('button');
+    pasteButton.textContent = 'Paste';
+    pasteButton.onclick = pastePage;
+    pasteButton.disabled = !state.pageClipboard;
+    tabsContainer.appendChild(pasteButton);
+
+    if (state.pages.length > 1) {
+        const deleteButton = document.createElement('button');
+        deleteButton.textContent = 'X';
+        deleteButton.className = 'delete-btn';
+        deleteButton.onclick = () => deletePage(state.currentPageIndex);
+        tabsContainer.appendChild(deleteButton);
+    }
+}
+
+// Initial Setup
+createToolbar();
+addPage(true);
+setActiveTool('pen');
