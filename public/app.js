@@ -14,9 +14,8 @@ const MAX_UNDO_LEVELS = 30;
 
 function recordUndoState(actionDescription) {
     if (state.undoStack.length >= MAX_UNDO_LEVELS) {
-        state.undoStack.shift(); // Remove the oldest state
+        state.undoStack.shift();
     }
-    // Deep clone the drawables array to save its state
     state.undoStack.push(JSON.parse(JSON.stringify(state.drawables)));
     console.log(`Action recorded: ${actionDescription}. Undo stack size: ${state.undoStack.length}`);
 }
@@ -25,15 +24,14 @@ function performUndo() {
     if (state.undoStack.length > 0) {
         state.drawables = state.undoStack.pop();
         renderAll();
-        console.log(`Undo performed. Undo stack size: ${state.undoStack.length}`);
+        console.log(`Undo performed. Remaining undo states: ${state.undoStack.length}`);
     } else {
         console.log("Nothing to undo.");
     }
 }
 
-
 // =================================================================
-// Canvas Setup
+// Canvas Setup & Rendering
 // =================================================================
 const canvasContainer = document.getElementById('canvas-container');
 const canvas = new fabric.Canvas('canvas', {
@@ -50,141 +48,151 @@ const resizeObserver = new ResizeObserver(resizeCanvas);
 resizeObserver.observe(canvasContainer);
 resizeCanvas();
 
-
-// =================================================================
-// Drawing & State Management
-// =================================================================
-let isDrawing = false;
-let startPoint = null;
-let currentFabricObject = null;
-
-// This function converts our data objects into Fabric.js objects for display
 function renderAll() {
     canvas.clear();
     state.drawables.forEach(drawable => {
         let fabricObject;
-        // This will be expanded to handle every shape type
-        if (drawable.objectDrawMode === 'rectangle') {
-            fabricObject = new fabric.Rect({
-                left: drawable.left,
-                top: drawable.top,
-                width: drawable.width,
-                height: drawable.height,
-                fill: drawable.fill,
-                stroke: drawable.stroke,
-                strokeWidth: drawable.strokeWidth,
-                angle: drawable.angle,
-                selectable: true,
-            });
+        const commonProps = {
+            left: drawable.left,
+            top: drawable.top,
+            fill: drawable.fill,
+            stroke: drawable.stroke,
+            strokeWidth: drawable.strokeWidth,
+            angle: drawable.angle,
+            selectable: true,
+            originX: 'left',
+            originY: 'top',
+        };
+
+        switch (drawable.objectDrawMode) {
+            case 'rectangle':
+                fabricObject = new fabric.Rect({ ...commonProps, width: drawable.width, height: drawable.height });
+                break;
+            case 'circle':
+                fabricObject = new fabric.Circle({ ...commonProps, radius: drawable.radius });
+                break;
+            case 'triangle':
+                 fabricObject = new fabric.Triangle({ ...commonProps, width: drawable.width, height: drawable.height });
+                break;
+            case 'line':
+                fabricObject = new fabric.Line([drawable.x1, drawable.y1, drawable.x2, drawable.y2], {
+                    stroke: drawable.stroke,
+                    strokeWidth: drawable.strokeWidth,
+                    selectable: true,
+                });
+                break;
         }
-        // Add more 'if' conditions for circles, lines, etc. here
 
         if (fabricObject) {
             canvas.add(fabricObject);
         }
     });
+    canvas.renderAll();
 }
 
-canvas.on('mouse:down', (o) => {
-    if (state.currentDrawMode === 'select') return;
-    
-    recordUndoState(`Start drawing ${state.currentDrawMode}`);
+// =================================================================
+// Drawing Event Logic
+// =================================================================
+let isDrawing = false;
+let startPoint = null;
+let currentDrawable = null;
 
+canvas.on('mouse:down', (o) => {
+    if (state.currentDrawMode === 'select' || state.currentDrawMode === 'pen') return;
+
+    recordUndoState(`Start drawing ${state.currentDrawMode}`);
     isDrawing = true;
     startPoint = canvas.getPointer(o.e);
+
+    const uniqueId = crypto.randomUUID();
     
-    const sharedProperties = {
+    currentDrawable = {
+        uniqueId: uniqueId,
+        objectDrawMode: state.currentDrawMode,
+        color: hexToRgba(state.brushColor, 1.0),
+        thickness: state.brushWidth,
+        isFilled: state.isShapeFilled,
+        
+        // Properties for Fabric.js rendering
         left: startPoint.x,
         top: startPoint.y,
+        width: 0,
+        height: 0,
+        radius: 0,
+        x1: startPoint.x,
+        y1: startPoint.y,
+        x2: startPoint.x,
+        y2: startPoint.y,
+        angle: 0,
+        fill: state.isShapeFilled ? state.brushColor + '66' : 'transparent',
         stroke: state.brushColor,
         strokeWidth: state.brushWidth,
-        fill: state.isShapeFilled ? state.brushColor + '66' : 'transparent',
-        selectable: false,
     };
 
-    if (state.currentDrawMode === 'rectangle') {
-        currentFabricObject = new fabric.Rect({ ...sharedProperties, width: 0, height: 0 });
-    }
-    // Add logic for other shapes here later
-
-    if (currentFabricObject) {
-        canvas.add(currentFabricObject);
-    }
+    state.drawables.push(currentDrawable);
 });
 
 canvas.on('mouse:move', (o) => {
-    if (!isDrawing || !currentFabricObject) return;
+    if (!isDrawing) return;
 
     const pointer = canvas.getPointer(o.e);
+    const width = Math.abs(pointer.x - startPoint.x);
+    const height = Math.abs(pointer.y - startPoint.y);
 
-    if (state.currentDrawMode === 'rectangle') {
-        currentFabricObject.set({
-            width: Math.abs(pointer.x - startPoint.x),
-            height: Math.abs(pointer.y - startPoint.y),
-            originX: (pointer.x < startPoint.x) ? 'right' : 'left',
-            originY: (pointer.y < startPoint.y) ? 'bottom' : 'top',
-        });
+    currentDrawable.left = Math.min(pointer.x, startPoint.x);
+    currentDrawable.top = Math.min(pointer.y, startPoint.y);
+
+    switch (currentDrawable.objectDrawMode) {
+        case 'rectangle':
+        case 'triangle':
+            currentDrawable.width = width;
+            currentDrawable.height = height;
+            break;
+        case 'circle':
+            currentDrawable.radius = Math.max(width, height) / 2;
+            currentDrawable.left = startPoint.x - currentDrawable.radius;
+            currentDrawable.top = startPoint.y - currentDrawable.radius;
+            break;
+        case 'line':
+            currentDrawable.x2 = pointer.x;
+            currentDrawable.y2 = pointer.y;
+            break;
     }
-    // Add logic for other shapes here later
-
-    canvas.renderAll();
+    
+    renderAll();
 });
 
 canvas.on('mouse:up', (o) => {
-    if (!isDrawing || !currentFabricObject) return;
-
-    // Create the data object that mirrors the C# structure
-    const newDrawable = {
-        // uniqueId: crypto.randomUUID(),
-        objectDrawMode: state.currentDrawMode, // This will be an enum value later
-        color: hexToRgba(state.brushColor, state.isShapeFilled ? 0.4 : 1.0),
-        thickness: state.brushWidth,
-        isFilled: state.isShapeFilled,
-        // Shape-specific properties
-        left: currentFabricObject.left,
-        top: currentFabricObject.top,
-        width: currentFabricObject.width,
-        height: currentFabricObject.height,
-        angle: currentFabricObject.angle,
-        // We will add more properties for other shapes
-    };
-
-    // Replace the temporary visual object with a new one from our data store
-    state.drawables.push(newDrawable);
-    
-    // In a real scenario, we would now serialize `newDrawable` and send it
-    
+    if (!isDrawing) return;
     isDrawing = false;
-    currentFabricObject = null;
+    currentDrawable = null;
     startPoint = null;
-    
-    renderAll();
+    renderAll(); // Final render to ensure selectable is true
 });
 
 
 // =================================================================
 // Toolbar Event Listeners
 // =================================================================
-const toolButtons = document.querySelectorAll('.tool-btn');
-toolButtons.forEach(button => {
+document.querySelectorAll('.tool-btn').forEach(button => {
     button.addEventListener('click', () => {
-        toolButtons.forEach(btn => btn.classList.remove('active'));
+        document.querySelectorAll('.tool-btn, .tool-group-btn').forEach(btn => btn.classList.remove('active'));
         button.classList.add('active');
         state.currentDrawMode = button.id;
         canvas.isDrawingMode = (state.currentDrawMode === 'pen');
         canvas.selection = (state.currentDrawMode === 'select');
         canvas.defaultCursor = (state.currentDrawMode === 'select') ? 'default' : 'crosshair';
+        canvas.discardActiveObject().renderAll(); // Deselect objects when changing tools
     });
 });
 
 document.querySelector('button.full-width-btn').addEventListener('click', performUndo);
 
-const thicknessButtons = document.querySelectorAll('.preset-btn');
-thicknessButtons.forEach(button => {
-    button.addEventListener('click', () => {
-        thicknessButtons.forEach(btn => btn.classList.remove('active'));
-        button.classList.add('active');
-        state.brushWidth = parseFloat(button.textContent);
+document.querySelectorAll('.preset-btn').forEach(button => {
+    button.addEventListener('click', (e) => {
+        document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
+        e.currentTarget.classList.add('active');
+        state.brushWidth = parseFloat(e.currentTarget.textContent);
         canvas.freeDrawingBrush.width = state.brushWidth;
     });
 });
