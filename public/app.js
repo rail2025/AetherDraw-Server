@@ -65,10 +65,7 @@ function renderAll() {
                 break;
             case 'line':
             case 'dash':
-                fabricObject = new fabric.Line([drawable.x1, drawable.y1, drawable.x2, drawable.y2], {
-                    ...commonProps,
-                    strokeDashArray: drawable.objectDrawMode === 'dash' ? [drawable.strokeWidth * 2, drawable.strokeWidth * 1.5] : null
-                });
+                fabricObject = new fabric.Polyline(drawable.points, { ...commonProps, stroke: drawable.stroke, fill: null, strokeDashArray: drawable.objectDrawMode === 'dash' ? [drawable.thickness * 2.5, drawable.thickness * 1.25] : null });
                 break;
             case 'arrow':
                  const line = new fabric.Line([drawable.x1, drawable.y1, drawable.x2, drawable.y2], { stroke: drawable.stroke, strokeWidth: drawable.strokeWidth });
@@ -83,15 +80,12 @@ function renderAll() {
             case 'icon':
                 fabric.loadSVGFromURL(drawable.iconUrl, (objects, options) => {
                     const icon = fabric.util.groupSVGElements(objects, options);
-                    icon.set({
-                        ...commonProps,
-                        left: drawable.left,
-                        top: drawable.top,
-                    }).scaleToWidth(drawable.width);
-                    canvas.add(icon);
+                    icon.set({ ...commonProps, left: drawable.left, top: drawable.top });
+                    icon.scaleToWidth(drawable.width);
                     icon.drawableId = drawable.uniqueId;
+                    canvas.add(icon);
                 });
-                return; // Asynchronous, so we return here
+                return;
         }
         if (fabricObject) {
             fabricObject.drawableId = drawable.uniqueId;
@@ -111,25 +105,40 @@ let isDrawing = false;
 let startPoint = null;
 
 canvas.on('mouse:down', (o) => {
-    if (state.currentDrawMode === 'select' || state.currentDrawMode === 'pen' || o.target) return;
-    
-    // BUG FIX: Only record undo state IF we are actually starting a drawing action
-    if (!isDrawing) {
-        recordUndoState(`Start drawing ${state.currentDrawMode}`);
-    }
-
+    if (state.currentDrawMode === 'select' || o.target) return;
+    recordUndoState(`Start drawing ${state.currentDrawMode}`);
     isDrawing = true;
     startPoint = canvas.getPointer(o.e);
-
-    const newDrawable = {
+    
+    const commonDrawableProps = {
         uniqueId: crypto.randomUUID(), objectDrawMode: state.currentDrawMode,
         thickness: state.brushWidth, isFilled: state.isShapeFilled,
         fill: state.isShapeFilled ? state.brushColor + '66' : 'transparent',
         stroke: state.brushColor, strokeWidth: state.brushWidth, angle: 0,
-        left: startPoint.x, top: startPoint.y, width: 0, height: 0, radius: 0,
-        x1: startPoint.x, y1: startPoint.y, x2: startPoint.x, y2: startPoint.y,
     };
-    if (newDrawable) state.drawables.push(newDrawable);
+
+    let newDrawable;
+    switch (state.currentDrawMode) {
+        case 'rectangle':
+        case 'triangle':
+            newDrawable = { ...commonDrawableProps, left: startPoint.x, top: startPoint.y, width: 0, height: 0 };
+            break;
+        case 'circle':
+            newDrawable = { ...commonDrawableProps, left: startPoint.x, top: startPoint.y, radius: 0 };
+            break;
+        case 'line':
+        case 'arrow':
+            newDrawable = { ...commonDrawableProps, x1: startPoint.x, y1: startPoint.y, x2: startPoint.x, y2: startPoint.y };
+            break;
+        case 'pen':
+        case 'dash':
+            newDrawable = { ...commonDrawableProps, points: [{ x: startPoint.x, y: startPoint.y }] };
+            break;
+    }
+
+    if (newDrawable) {
+        state.drawables.push(newDrawable);
+    }
 });
 
 canvas.on('mouse:move', (o) => {
@@ -137,22 +146,25 @@ canvas.on('mouse:move', (o) => {
     const pointer = canvas.getPointer(o.e);
     let currentDrawable = state.drawables[state.drawables.length - 1];
     
-    currentDrawable.left = Math.min(pointer.x, startPoint.x);
-    currentDrawable.top = Math.min(pointer.y, startPoint.y);
-    currentDrawable.width = Math.abs(pointer.x - startPoint.x);
-    currentDrawable.height = Math.abs(pointer.y - startPoint.y);
-
-    if (currentDrawable.objectDrawMode === 'circle') {
-        currentDrawable.radius = Math.sqrt(Math.pow(currentDrawable.width, 2) + Math.pow(currentDrawable.height, 2)) / 2;
-    } else if (['line', 'arrow', 'dash'].includes(currentDrawable.objectDrawMode)) {
-        currentDrawable.left = undefined; currentDrawable.top = undefined;
-        currentDrawable.x2 = pointer.x;
-        currentDrawable.y2 = pointer.y;
+    if (['pen', 'dash'].includes(state.currentDrawMode)) {
+        currentDrawable.points.push({ x: pointer.x, y: pointer.y });
+    } else {
+        currentDrawable.left = Math.min(pointer.x, startPoint.x);
+        currentDrawable.top = Math.min(pointer.y, startPoint.y);
+        currentDrawable.width = Math.abs(pointer.x - startPoint.x);
+        currentDrawable.height = Math.abs(pointer.y - startPoint.y);
+        if (currentDrawable.objectDrawMode === 'circle') {
+            currentDrawable.radius = Math.sqrt(Math.pow(currentDrawable.width, 2) + Math.pow(currentDrawable.height, 2)) / 2;
+        } else if (['line', 'arrow'].includes(currentDrawable.objectDrawMode)) {
+            currentDrawable.left = undefined; currentDrawable.top = undefined;
+            currentDrawable.x2 = pointer.x;
+            currentDrawable.y2 = pointer.y;
+        }
     }
     renderAll();
 });
 
-canvas.on('mouse:up', (o) => {
+canvas.on('mouse:up', () => {
     if (!isDrawing) return;
     isDrawing = false;
     renderAll();
@@ -169,52 +181,65 @@ canvas.on('object:modified', (e) => {
     drawable.angle = fabricObject.angle;
     drawable.width = fabricObject.width * fabricObject.scaleX;
     drawable.height = fabricObject.height * fabricObject.scaleY;
-
     if (drawable.objectDrawMode === 'circle') {
         drawable.radius = (fabricObject.radius * Math.max(fabricObject.scaleX, fabricObject.scaleY));
     }
-    
     fabricObject.set({ scaleX: 1, scaleY: 1 });
     renderAll();
 });
 
+
 // =================================================================
 // Toolbar & Icon Logic
 // =================================================================
-const iconUrlBase = 'https://raw.githubusercontent.com/rail2025/AetherDraw/master/AetherDraw/PluginImages/svg/';
-const iconTools = {
-    'Roles': [{ id: 'tank', url: `${iconUrlBase}role_tank.svg` }, { id: 'healer', url: `${iconUrlBase}role_healer.svg` }],
-    'Mechanics': [{ id: 'stack', url: `${iconUrlBase}stack.svg` }, { id: 'spread', url: `${iconUrlBase}spread.svg` }],
+const iconUrlBase = '/icons/';
+const toolDefinitions = {
+    'Drawing': [ { id: 'pen', name: 'Pen' }, { id: 'line', name: 'Line' }, { id: 'dash', name: 'Dash' }],
+    'Shapes': [ { id: 'rectangle', name: 'Rect' }, { id: 'circle', name: 'Circle' }, { id: 'arrow', name: 'Arrow' }, { id: 'triangle', name: 'Triangle' }],
+    'Roles': [ { id: 'role_tank', name: 'Tank', icon: 'role_tank.svg' }, { id: 'role_healer', name: 'Healer', icon: 'role_healer.svg' }],
+    'Mechanics': [ { id: 'stack', name: 'Stack', icon: 'stack.svg' }, { id: 'spread', name: 'Spread', icon: 'spread.svg' }, { id: 'line_stack', name: 'Line Stack', icon: 'line_stack.svg' }, { id: 'donut', name: 'Donut', icon: 'donut.svg' }, { id: 'flare', name: 'Flare', icon: 'flare.svg' }],
+    'Waymarks': [ { id: 'waymark_a', name: 'A', icon: 'A.png' }, { id: 'waymark_b', name: 'B', icon: 'B.png' }, { id: 'waymark_c', name: 'C', icon: 'C.png' }, { id: 'waymark_d', name: 'D', icon: 'D.png' }],
+    'Numbers': [ { id: 'waymark_1', name: '1', icon: '1_waymark.png' }, { id: 'waymark_2', name: '2', icon: '2_waymark.png' }, { id: 'waymark_3', name: '3', icon: '3_waymark.png' }, { id: 'waymark_4', name: '4', icon: '4_waymark.png' }]
 };
 
 const toolGroupsGrid = document.getElementById('tool-groups-grid');
-for (const groupName in iconTools) {
-    const groupData = iconTools[groupName];
+
+for (const groupName in toolDefinitions) {
+    const groupData = toolDefinitions[groupName];
     const groupDiv = document.createElement('div');
     groupDiv.className = 'tool-group';
     
     const mainButton = document.createElement('button');
-    mainButton.id = `${groupData[0].id}-group`;
+    mainButton.id = `${groupName.toLowerCase()}-group`;
     mainButton.className = 'tool-group-btn';
-    mainButton.innerHTML = `<img src="${groupData[0].url}" alt="${groupName}">`;
+    mainButton.innerHTML = groupData[0].icon ? `<img src="${iconUrlBase}${groupData[0].icon}" alt="${groupName}">` : groupData[0].name;
     
     const popup = document.createElement('div');
     popup.className = 'tool-popup';
 
     groupData.forEach(tool => {
         const button = document.createElement('button');
-        button.id = `icon-${tool.id}`;
-        button.className = 'tool-btn icon-btn';
-        button.innerHTML = `<img src="${tool.url}" alt="${tool.id}">`;
-        button.onclick = () => {
-            const iconDrawable = {
-                uniqueId: crypto.randomUUID(), objectDrawMode: 'icon', iconUrl: tool.url,
-                left: canvas.width / 2 - 25, top: canvas.height / 2 - 25, width: 50, height: 50,
-                angle: 0, strokeWidth: 0, fill: '#FFFFFF'
-            };
-            state.drawables.push(iconDrawable);
-            renderAll();
-            setActiveTool('select');
+        button.id = tool.id;
+        button.className = 'tool-btn';
+        const imgHtml = tool.icon ? `<img src="${iconUrlBase}${tool.icon}" alt="${tool.name}" style="height: 20px; margin-right: 5px;">` : '';
+        button.innerHTML = `${imgHtml}${tool.name}`;
+        
+        button.onclick = (e) => {
+            e.stopPropagation();
+            if (tool.icon) {
+                recordUndoState(`Add icon: ${tool.name}`);
+                const iconDrawable = {
+                    uniqueId: crypto.randomUUID(), objectDrawMode: 'icon', iconUrl: `${iconUrlBase}${tool.icon}`,
+                    left: canvas.width / 2 - 25, top: canvas.height / 2 - 25, width: 50, height: 50,
+                    angle: 0, strokeWidth: 0, fill: 'transparent', stroke: 'transparent'
+                };
+                state.drawables.push(iconDrawable);
+                renderAll();
+                setActiveTool('select');
+            } else {
+                setActiveTool(tool.id);
+            }
+            document.querySelectorAll('.tool-popup').forEach(p => p.classList.remove('active'));
         };
         popup.appendChild(button);
     });
@@ -224,23 +249,19 @@ for (const groupName in iconTools) {
     toolGroupsGrid.appendChild(groupDiv);
 }
 
-
 function setActiveTool(toolId) {
     state.currentDrawMode = toolId;
     document.querySelectorAll('.tool-btn, .tool-group-btn').forEach(btn => btn.classList.remove('active'));
-    
     const clickedButton = document.getElementById(toolId);
     if (!clickedButton) return;
-
     const groupButton = clickedButton.closest('.tool-group')?.querySelector('.tool-group-btn');
-
     if (groupButton) {
         groupButton.classList.add('active');
-        groupButton.innerHTML = clickedButton.innerHTML;
+        const clickedContent = clickedButton.querySelector('img');
+        groupButton.innerHTML = clickedContent ? clickedContent.outerHTML : clickedButton.textContent;
     } else {
         clickedButton.classList.add('active');
     }
-
     canvas.isDrawingMode = (state.currentDrawMode === 'pen');
     canvas.selection = (state.currentDrawMode === 'select');
     canvas.forEachObject(obj => obj.selectable = (state.currentDrawMode === 'select'));
@@ -258,13 +279,8 @@ document.querySelectorAll('.tool-group-btn').forEach(button => {
     });
 });
 
-document.querySelectorAll('.tool-btn').forEach(button => {
-    if (!button.classList.contains('icon-btn')) {
-        button.addEventListener('click', () => {
-            setActiveTool(button.id);
-            document.querySelectorAll('.tool-popup').forEach(p => p.classList.remove('active'));
-        });
-    }
+document.querySelectorAll('#toolbar > .tool-grid > .tool-btn, #text').forEach(button => {
+    button.addEventListener('click', () => setActiveTool(button.id));
 });
 
 document.addEventListener('click', (e) => {
