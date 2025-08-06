@@ -708,6 +708,11 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+
+	// Serve static files from the 'public' directory
+	fs := http.FileServer(http.Dir("./public"))
+	mux.Handle("/", fs)
+
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(hub, w, r)
 	})
