@@ -8,14 +8,14 @@ body {
 }
 
 #toolbar {
-    width: 125px;
+    width: 160px; /* Increased width */
     padding: 10px;
     background-color: #2e2e2e;
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
     overflow-y: auto;
-    z-index: 10;
+    z-index: 100; /* Ensure toolbar is on top */
 }
 
 /* --- Grids --- */
@@ -67,14 +67,15 @@ button.active {
 .tool-popup {
     display: none; /* Hidden by default */
     position: absolute;
-    left: 100%;
+    left: 105%; /* Position next to the toolbar */
     top: 0;
     background-color: #3a3a3a;
     border: 1px solid #666;
     border-radius: 4px;
     padding: 5px;
-    z-index: 20;
+    z-index: 200; /* Higher z-index to appear over the canvas */
     width: 120px;
+    box-shadow: 3px 3px 8px rgba(0,0,0,0.5);
 }
 .tool-popup.active {
     display: block; /* Shown when active */
@@ -170,6 +171,7 @@ button.active {
 #canvas-container {
     flex-grow: 1;
     position: relative;
+    overflow: hidden; /* Prevents scrollbars from appearing due to canvas artifacts */
 }
 canvas {
     position: absolute;
