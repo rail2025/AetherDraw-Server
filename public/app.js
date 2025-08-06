@@ -58,13 +58,17 @@ function renderAll() {
                 fabricObject = new fabric.Rect({ ...commonProps, left: drawable.left, top: drawable.top, width: drawable.width, height: drawable.height });
                 break;
             case 'circle':
-                fabricObject = new fabric.Circle({ ...commonProps, left: drawable.left, top: drawable.top, radius: drawable.radius, originX: 'center', originY: 'center' });
+                fabricObject = new fabric.Circle({ ...commonProps, left: drawable.left, top: drawable.top, radius: drawable.radius });
                 break;
             case 'triangle':
                 fabricObject = new fabric.Triangle({ ...commonProps, left: drawable.left, top: drawable.top, width: drawable.width, height: drawable.height });
                 break;
             case 'line':
-                fabricObject = new fabric.Line([drawable.x1, drawable.y1, drawable.x2, drawable.y2], { stroke: drawable.stroke, strokeWidth: drawable.strokeWidth, selectable: state.currentDrawMode === 'select' });
+            case 'dash':
+                fabricObject = new fabric.Line([drawable.x1, drawable.y1, drawable.x2, drawable.y2], {
+                    ...commonProps,
+                    strokeDashArray: drawable.objectDrawMode === 'dash' ? [drawable.strokeWidth * 2, drawable.strokeWidth * 1.5] : null
+                });
                 break;
             case 'arrow':
                  const line = new fabric.Line([drawable.x1, drawable.y1, drawable.x2, drawable.y2], { stroke: drawable.stroke, strokeWidth: drawable.strokeWidth });
@@ -76,6 +80,18 @@ function renderAll() {
                  });
                  fabricObject = new fabric.Group([line, arrowHead], { selectable: state.currentDrawMode === 'select', angle: drawable.angle });
                 break;
+            case 'icon':
+                fabric.loadSVGFromURL(drawable.iconUrl, (objects, options) => {
+                    const icon = fabric.util.groupSVGElements(objects, options);
+                    icon.set({
+                        ...commonProps,
+                        left: drawable.left,
+                        top: drawable.top,
+                    }).scaleToWidth(drawable.width);
+                    canvas.add(icon);
+                    icon.drawableId = drawable.uniqueId;
+                });
+                return; // Asynchronous, so we return here
         }
         if (fabricObject) {
             fabricObject.drawableId = drawable.uniqueId;
@@ -96,9 +112,15 @@ let startPoint = null;
 
 canvas.on('mouse:down', (o) => {
     if (state.currentDrawMode === 'select' || state.currentDrawMode === 'pen' || o.target) return;
-    recordUndoState(`Start drawing ${state.currentDrawMode}`);
+    
+    // BUG FIX: Only record undo state IF we are actually starting a drawing action
+    if (!isDrawing) {
+        recordUndoState(`Start drawing ${state.currentDrawMode}`);
+    }
+
     isDrawing = true;
     startPoint = canvas.getPointer(o.e);
+
     const newDrawable = {
         uniqueId: crypto.randomUUID(), objectDrawMode: state.currentDrawMode,
         thickness: state.brushWidth, isFilled: state.isShapeFilled,
@@ -122,7 +144,7 @@ canvas.on('mouse:move', (o) => {
 
     if (currentDrawable.objectDrawMode === 'circle') {
         currentDrawable.radius = Math.sqrt(Math.pow(currentDrawable.width, 2) + Math.pow(currentDrawable.height, 2)) / 2;
-    } else if (['line', 'arrow'].includes(currentDrawable.objectDrawMode)) {
+    } else if (['line', 'arrow', 'dash'].includes(currentDrawable.objectDrawMode)) {
         currentDrawable.left = undefined; currentDrawable.top = undefined;
         currentDrawable.x2 = pointer.x;
         currentDrawable.y2 = pointer.y;
@@ -156,20 +178,65 @@ canvas.on('object:modified', (e) => {
     renderAll();
 });
 
+// =================================================================
+// Toolbar & Icon Logic
+// =================================================================
+const iconUrlBase = 'https://raw.githubusercontent.com/rail2025/AetherDraw/master/AetherDraw/PluginImages/svg/';
+const iconTools = {
+    'Roles': [{ id: 'tank', url: `${iconUrlBase}role_tank.svg` }, { id: 'healer', url: `${iconUrlBase}role_healer.svg` }],
+    'Mechanics': [{ id: 'stack', url: `${iconUrlBase}stack.svg` }, { id: 'spread', url: `${iconUrlBase}spread.svg` }],
+};
 
-// =================================================================
-// Toolbar Event Listeners
-// =================================================================
+const toolGroupsGrid = document.getElementById('tool-groups-grid');
+for (const groupName in iconTools) {
+    const groupData = iconTools[groupName];
+    const groupDiv = document.createElement('div');
+    groupDiv.className = 'tool-group';
+    
+    const mainButton = document.createElement('button');
+    mainButton.id = `${groupData[0].id}-group`;
+    mainButton.className = 'tool-group-btn';
+    mainButton.innerHTML = `<img src="${groupData[0].url}" alt="${groupName}">`;
+    
+    const popup = document.createElement('div');
+    popup.className = 'tool-popup';
+
+    groupData.forEach(tool => {
+        const button = document.createElement('button');
+        button.id = `icon-${tool.id}`;
+        button.className = 'tool-btn icon-btn';
+        button.innerHTML = `<img src="${tool.url}" alt="${tool.id}">`;
+        button.onclick = () => {
+            const iconDrawable = {
+                uniqueId: crypto.randomUUID(), objectDrawMode: 'icon', iconUrl: tool.url,
+                left: canvas.width / 2 - 25, top: canvas.height / 2 - 25, width: 50, height: 50,
+                angle: 0, strokeWidth: 0, fill: '#FFFFFF'
+            };
+            state.drawables.push(iconDrawable);
+            renderAll();
+            setActiveTool('select');
+        };
+        popup.appendChild(button);
+    });
+    
+    groupDiv.appendChild(mainButton);
+    groupDiv.appendChild(popup);
+    toolGroupsGrid.appendChild(groupDiv);
+}
+
+
 function setActiveTool(toolId) {
     state.currentDrawMode = toolId;
     document.querySelectorAll('.tool-btn, .tool-group-btn').forEach(btn => btn.classList.remove('active'));
     
     const clickedButton = document.getElementById(toolId);
+    if (!clickedButton) return;
+
     const groupButton = clickedButton.closest('.tool-group')?.querySelector('.tool-group-btn');
 
     if (groupButton) {
         groupButton.classList.add('active');
-        groupButton.textContent = clickedButton.textContent;
+        groupButton.innerHTML = clickedButton.innerHTML;
     } else {
         clickedButton.classList.add('active');
     }
@@ -184,6 +251,7 @@ function setActiveTool(toolId) {
 document.querySelectorAll('.tool-group-btn').forEach(button => {
     button.addEventListener('click', (e) => {
         const popup = e.currentTarget.nextElementSibling;
+        if (!popup) return;
         const isActive = popup.classList.contains('active');
         document.querySelectorAll('.tool-popup').forEach(p => p.classList.remove('active'));
         if (!isActive) popup.classList.add('active');
@@ -191,10 +259,12 @@ document.querySelectorAll('.tool-group-btn').forEach(button => {
 });
 
 document.querySelectorAll('.tool-btn').forEach(button => {
-    button.addEventListener('click', () => {
-        setActiveTool(button.id)
-        document.querySelectorAll('.tool-popup').forEach(p => p.classList.remove('active'));
-    });
+    if (!button.classList.contains('icon-btn')) {
+        button.addEventListener('click', () => {
+            setActiveTool(button.id);
+            document.querySelectorAll('.tool-popup').forEach(p => p.classList.remove('active'));
+        });
+    }
 });
 
 document.addEventListener('click', (e) => {
@@ -210,10 +280,8 @@ document.querySelectorAll('.preset-btn').forEach(button => {
     button.addEventListener('click', (e) => {
         document.querySelectorAll('.preset-btn').forEach(btn => btn.classList.remove('active'));
         e.currentTarget.classList.add('active');
-        const newWidth = parseFloat(e.currentTarget.textContent);
-        state.brushWidth = newWidth;
+        state.brushWidth = parseFloat(e.currentTarget.textContent);
         canvas.freeDrawingBrush.width = state.brushWidth;
-        // Removed logic that modified selected objects
     });
 });
 
@@ -227,7 +295,6 @@ colorPalette.forEach(color => {
         e.currentTarget.classList.add('active');
         state.brushColor = color;
         canvas.freeDrawingBrush.color = state.brushColor;
-        // Removed logic that modified selected objects
     });
     paletteContainer.appendChild(button);
 });
@@ -236,7 +303,6 @@ document.querySelector('.color-palette button').click();
 document.getElementById('fill-switch').addEventListener('click', (e) => {
     state.isShapeFilled = !state.isShapeFilled;
     e.currentTarget.parentElement.classList.toggle('outline', !state.isShapeFilled);
-    // Removed logic that modified selected objects
 });
 
 // Set initial tool
