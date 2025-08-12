@@ -235,6 +235,26 @@ func newHub() *Hub {
 	}
 }
 
+// sendHistory sends the room's message history to a new client in the background.
+// It runs in a separate goroutine to avoid blocking the main hub loop.
+func (h *Hub) sendHistory(client *Client, history [][]byte) {
+	// Recover from panics that can occur if a client disconnects mid-transfer
+	// and the send channel is closed. This prevents the entire server from crashing.
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Warn("History send failed: client disconnected.", "room", client.room)
+		}
+	}()
+
+	slog.Info("Starting history send in background.", "room", client.room, "messages", len(history))
+	// Loop through the history and send each message. This is a blocking send.
+	// It will wait if the client's send buffer is full, providing natural backpressure.
+	for _, msg := range history {
+		client.send <- msg
+	}
+	slog.Info("Finished sending history in background.", "room", client.room)
+}
+
 // run starts the Hub's message processing loop.
 func (h *Hub) run() {
 	for {
@@ -273,16 +293,17 @@ func (h *Hub) run() {
 			}
 			h.roomsMux.Unlock()
 
+			// Asynchronously send the existing room history to the new client.
 			room.historyMux.RLock()
-			for _, msg := range room.history {
-				select {
-				case client.send <- msg:
-				default:
-					slog.Warn("Failed to send history message to client, send channel full", "room", client.room)
-				}
-			}
+			// Create a copy of the history to send, so we don't hold the lock for a long time.
+			historyCopy := make([][]byte, len(room.history))
+			copy(historyCopy, room.history)
 			room.historyMux.RUnlock()
-			slog.Info("Client history sent", "room", client.room, "clients_in_room", len(room.clients))
+
+			// Start a new goroutine to prevent the hub from blocking while sending history.
+			if len(historyCopy) > 0 {
+				go h.sendHistory(client, historyCopy)
+			}
 
 		case client := <-h.unregister:
 			h.roomsMux.Lock()
@@ -688,7 +709,7 @@ func main() {
 					port = "8080"
 				}
 				url := "http://localhost:" + port + "/hello"
-				
+
 				resp, err := http.Get(url)
 				if err != nil {
 					slog.Error("Self-ping failed", "error", err)
@@ -756,4 +777,3 @@ func main() {
 
 	slog.Info("Server gracefully stopped")
 }
-
