@@ -8,63 +8,49 @@
 </head>
 <body>
     <div id="toolbar">
-        <div class="tool-grid">
-            <button id="select" class="tool-btn">Select</button>
-            <button id="eraser" class="tool-btn">Eraser</button>
-        </div>
-        <button id="undo" class="full-width-btn">Undo</button>
-        <button id="clear" class="full-width-btn">Clear All</button>
-
-        <hr class="separator">
-
-        <div class="tool-grid" id="tool-groups-grid"></div>
-        <button id="text" class="full-width-btn tool-btn">Text Tool</button>
-        
-        <hr class="separator">
-
-        <div class="fill-toggle">
-            <span>Fill</span>
-            <div id="fill-switch" class="toggle-switch"><div class="toggle-thumb"></div></div>
-            <span>Outline</span>
-        </div>
-
-        <hr class="separator">
-
-        <div class="label">Thickness:</div>
-        <div class="preset-grid">
-            <button class="preset-btn">1.5</button>
-            <button class="preset-btn active">4</button>
-            <button class="preset-btn">7</button>
-            <button class="preset-btn">10</button>
-        </div>
-
-        <hr class="separator">
-
-        <div class="color-palette"></div>
-        
-        <div class="footer">
-            <a href="https://github.com/rail2025/AetherDraw/issues" target="_blank" class="full-width-btn footer-btn bug-report">Bug report/<br>Feature request</a>
-            <a href="https://ko-fi.com/rail2025" target="_blank" class="full-width-btn footer-btn kofi">Support on Ko-Fi</a>
-        </div>
     </div>
+
+    <div id="tool-options"></div>
 
     <div id="main-content">
         <div id="canvas-container">
             <canvas id="canvas"></canvas>
         </div>
         <div id="bottom-bar">
-            <div id="page-tabs"></div>
+            <div id="page-controls">
+                <div id="page-tabs"></div>
+                <button id="add-page-btn" title="Add Page">+</button>
+                <button id="copy-page-btn" title="Copy Current Page">Copy</button>
+                <button id="paste-page-btn" title="Paste Copied Page" disabled>Paste</button>
+                <button id="delete-page-btn" class="delete-btn" title="Delete Current Page">X</button>
+            </div>
             <div id="action-buttons">
-                <button id="load">Load</button>
-                <button id="save">Save</button>
-                <button id="live">Join/Create Live</button>
+                <button id="load-btn">Load</button>
+                <button id="save-btn">Save</button>
+                <button id="live-btn">Join Live</button>
             </div>
         </div>
     </div>
 
+    <div id="live-session-modal" class="modal-backdrop" style="display: none;">
+        <div class="modal">
+            <h3>Live Session</h3>
+            <div id="connection-status">Status: Disconnected</div>
+            <input type="text" id="passphrase-input" placeholder="Enter or Generate Passphrase...">
+            <button id="generate-passphrase-btn">Generate</button>
+            <div class="modal-buttons">
+                <button id="connect-btn">Connect</button>
+                <button id="disconnect-btn" style="display: none;">Disconnect</button>
+                <button id="close-modal-btn">Close</button>
+            </div>
+        </div>
+    </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
     <script src="serialization.js"></script>
+    <script src="network.js"></script>
+    <script src="ui.js"></script>
+    <script src="canvas.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
