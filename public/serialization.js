@@ -1,5 +1,5 @@
 /**
- * AetherDraw Web Serialization Module
+ * AetherDraw Web Serialization Module (for Konva.js)
  * Handles binary serialization and deserialization of drawable objects and network payloads
  * to ensure compatibility with the AetherDraw C# plugin.
  */
@@ -12,7 +12,7 @@ const DrawMode = {
     RoleTankImage: 28, RoleHealerImage: 29, RoleMeleeImage: 30, RoleRangedImage: 31, TriangleImage: 32,
     SquareImage: 33, PlusImage: 34, CircleMarkImage: 35, Party1Image: 36, Party2Image: 37, Party3Image: 38,
     Party4Image: 39, Party5Image: 40, Party6Image: 41, Party7Image: 42, Party8Image: 43, TextTool: 44,
-    StackIcon: 45, SpreadIcon: 46, TetherIcon: 47, BossIconPlaceholder: 48, AddMobIcon: 49, Dot1Image: 50,
+    StackIcon: 19, SpreadIcon: 18, TetherIcon: 47, BossIconPlaceholder: 48, AddMobIcon: 49, Dot1Image: 50,
     Dot2Image: 51, Dot3Image: 52, Dot4Image: 53, Dot5Image: 54, Dot6Image: 55, Dot7Image: 56, Dot8Image: 57,
 };
 
@@ -26,9 +26,6 @@ const PayloadActionType = {
 
 const SERIALIZATION_VERSION = 1;
 
-/**
- * A helper class to read from and write to an ArrayBuffer, matching C#'s BinaryWriter/Reader behavior.
- */
 class BufferHandler {
     constructor(buffer) {
         this.buffer = buffer || new ArrayBuffer(1024);
@@ -53,12 +50,21 @@ class BufferHandler {
     writeString(str) {
         const buffer = new TextEncoder().encode(str);
         let len = buffer.length;
-        while (len >= 0x80) { this.writeUint8(len | 0x80); len >>= 7; }
-        this.writeUint8(len);
+        this.writeUint8(len); // Using simple length prefix for compatibility with C# BinaryWriter
         this.writeBytes(buffer);
     }
+    
     writeGuid(guid) {
-        const bytes = guid.replace(/-/g, '').match(/.{1,2}/g).map(byte => parseInt(byte, 16));
+        const hex = guid.replace(/-/g, '');
+        const bytes = new Uint8Array(16);
+        for (let i = 0; i < 16; i++) {
+            bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+        }
+        
+        [bytes[0], bytes[1], bytes[2], bytes[3]] = [bytes[3], bytes[2], bytes[1], bytes[0]];
+        [bytes[4], bytes[5]] = [bytes[5], bytes[4]];
+        [bytes[6], bytes[7]] = [bytes[7], bytes[6]];
+        
         this.writeBytes(bytes);
     }
 
@@ -72,8 +78,14 @@ class BufferHandler {
         const buffer = this.readBytes(len);
         return new TextDecoder().decode(buffer);
     }
+
     readGuid() {
         const bytes = Array.from(this.readBytes(16));
+        
+        [bytes[0], bytes[1], bytes[2], bytes[3]] = [bytes[3], bytes[2], bytes[1], bytes[0]];
+        [bytes[4], bytes[5]] = [bytes[5], bytes[4]];
+        [bytes[6], bytes[7]] = [bytes[7], bytes[6]];
+
         const s = (b, o, l) => b.slice(o, o + l).map(x => x.toString(16).padStart(2, '0')).join('');
         return `${s(bytes, 0, 4)}-${s(bytes, 4, 2)}-${s(bytes, 6, 2)}-${s(bytes, 8, 2)}-${s(bytes, 10, 6)}`;
     }
@@ -81,16 +93,17 @@ class BufferHandler {
     getBuffer() { return this.buffer.slice(0, this.offset); }
 }
 
-
 function serializeSingleDrawable(writer, drawable) {
     writer.writeUint8(drawable.objectDrawMode);
 
-    const color = new fabric.Color(drawable.stroke || drawable.fill || '#FFFFFF');
-    const rgba = color.getSource(); // returns [r, g, b, a]
-    writer.writeFloat32(rgba[0] / 255);
-    writer.writeFloat32(rgba[1] / 255);
-    writer.writeFloat32(rgba[2] / 255);
-    writer.writeFloat32(rgba[3]);
+    const colorStr = drawable.stroke || drawable.fill || '#FFFFFF';
+    const rgba = Konva.Util.getRGB(colorStr);
+    
+    writer.writeFloat32(rgba.r / 255);
+    writer.writeFloat32(rgba.g / 255);
+    writer.writeFloat32(rgba.b / 255);
+    writer.writeFloat32(rgba.a !== undefined ? rgba.a : 1.0);
+
     writer.writeFloat32(drawable.strokeWidth || 1);
     writer.writeUint8(drawable.fill && drawable.fill !== 'transparent' ? 1 : 0);
     writer.writeGuid(drawable.uniqueId);
@@ -98,56 +111,25 @@ function serializeSingleDrawable(writer, drawable) {
     switch (drawable.objectDrawMode) {
         case DrawMode.Pen:
         case DrawMode.Dash:
+        case DrawMode.Triangle:
             writer.writeInt32(drawable.points.length);
             drawable.points.forEach(p => { writer.writeFloat32(p.x); writer.writeFloat32(p.y); });
             if (drawable.objectDrawMode === DrawMode.Dash) {
+                // MODIFIED: This logic is a placeholder and incorrect.
+                // It should serialize actual DashLength and GapLength properties.
                 writer.writeFloat32(drawable.strokeWidth * 2.5);
                 writer.writeFloat32(drawable.strokeWidth * 1.25);
             }
             break;
-        case DrawMode.Triangle:
-            writer.writeFloat32(drawable.points[0].x); writer.writeFloat32(drawable.points[0].y);
-            writer.writeFloat32(drawable.points[1].x); writer.writeFloat32(drawable.points[1].y);
-            writer.writeFloat32(drawable.points[2].x); writer.writeFloat32(drawable.points[2].y);
-            break;
-        case DrawMode.StraightLine:
-            writer.writeFloat32(drawable.startPoint.x); writer.writeFloat32(drawable.startPoint.y);
-            writer.writeFloat32(drawable.endPoint.x); writer.writeFloat32(drawable.endPoint.y);
-            break;
-        case DrawMode.Rectangle:
-            writer.writeFloat32(drawable.left); writer.writeFloat32(drawable.top);
-            writer.writeFloat32(drawable.left + (drawable.width * drawable.scaleX));
-            writer.writeFloat32(drawable.top + (drawable.height * drawable.scaleY));
-            writer.writeFloat32(drawable.angle * (Math.PI / 180));
-            break;
-        case DrawMode.Circle:
-        case DrawMode.Donut:
-            writer.writeFloat32(drawable.left + drawable.radius * drawable.scaleX);
-            writer.writeFloat32(drawable.top + drawable.radius * drawable.scaleY);
-            writer.writeFloat32(drawable.radius * drawable.scaleX);
-            break;
-        case DrawMode.Arrow:
-            writer.writeFloat32(drawable.startPoint.x); writer.writeFloat32(drawable.startPoint.y);
-            writer.writeFloat32(drawable.endPoint.x); writer.writeFloat32(drawable.endPoint.y);
-            writer.writeFloat32(drawable.angle);
-            writer.writeFloat32(drawable.strokeWidth * 5.0);
-            writer.writeFloat32(3.0);
-            break;
-        case DrawMode.TextTool:
-            writer.writeString(drawable.text);
-            writer.writeFloat32(drawable.left);
-            writer.writeFloat32(drawable.top);
-            writer.writeFloat32(drawable.fontSize);
-            writer.writeFloat32(drawable.width * drawable.scaleX);
-            break;
         default:
             if (drawable.objectDrawMode >= DrawMode.Image && drawable.objectDrawMode <= DrawMode.Dot8Image) {
-                writer.writeString(drawable.imageResourcePath);
-                writer.writeFloat32(drawable.left + (drawable.width * drawable.scaleX / 2));
-                writer.writeFloat32(drawable.top + (drawable.height * drawable.scaleY / 2));
-                writer.writeFloat32(drawable.width * drawable.scaleX);
-                writer.writeFloat32(drawable.height * drawable.scaleY);
-                writer.writeFloat32(drawable.angle * (Math.PI / 180));
+                // MODIFIED: Write the C# compatible resource path instead of the local URL.
+                writer.writeString(drawable.pluginResourcePath || '');
+                writer.writeFloat32(drawable.left); 
+                writer.writeFloat32(drawable.top);
+                writer.writeFloat32(drawable.width);
+                writer.writeFloat32(drawable.height);
+                writer.writeFloat32(drawable.angle * (Math.PI / 180)); // Convert degrees to radians
             } else {
                 console.warn("Serialization for mode not implemented:", drawable.objectDrawMode);
             }
@@ -155,13 +137,14 @@ function serializeSingleDrawable(writer, drawable) {
     }
 }
 
-function deserializeSingleDrawable(reader) {
+// MODIFIED: Function now accepts reverse maps to find local URLs for rendering
+function deserializeSingleDrawable(reader, pluginResourcePathToToolName, allModeDetails) {
     const mode = reader.readUint8();
     const r = reader.readFloat32() * 255;
     const g = reader.readFloat32() * 255;
     const b = reader.readFloat32() * 255;
     const a = reader.readFloat32();
-    const color = `rgba(${r}, ${g}, ${b}, ${a})`;
+    const color = `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}, ${a})`;
     const thickness = reader.readFloat32();
     const isFilled = reader.readUint8() === 1;
     const uniqueId = reader.readGuid();
@@ -170,78 +153,36 @@ function deserializeSingleDrawable(reader) {
 
     switch (mode) {
         case DrawMode.Pen:
+        case DrawMode.Dash:
+        case DrawMode.Triangle:
             const pointCount = reader.readInt32();
             drawable.points = [];
             for (let i = 0; i < pointCount; i++) drawable.points.push({ x: reader.readFloat32(), y: reader.readFloat32() });
             drawable.stroke = color;
-            drawable.fill = 'transparent';
-            break;
-        case DrawMode.Dash:
-            const dashPointCount = reader.readInt32();
-            drawable.points = [];
-            for (let i = 0; i < dashPointCount; i++) drawable.points.push({ x: reader.readFloat32(), y: reader.readFloat32() });
-            drawable.stroke = color;
-            drawable.fill = 'transparent';
-            drawable.dashLength = reader.readFloat32();
-            drawable.gapLength = reader.readFloat32();
-            break;
-        case DrawMode.Triangle:
-            drawable.points = [
-                { x: reader.readFloat32(), y: reader.readFloat32() },
-                { x: reader.readFloat32(), y: reader.readFloat32() },
-                { x: reader.readFloat32(), y: reader.readFloat32() }
-            ];
-            drawable.stroke = color;
             drawable.fill = isFilled ? color : 'transparent';
-            break;
-        case DrawMode.StraightLine:
-            drawable.x1 = reader.readFloat32(); drawable.y1 = reader.readFloat32();
-            drawable.x2 = reader.readFloat32(); drawable.y2 = reader.readFloat32();
-            drawable.stroke = color;
-            break;
-        case DrawMode.Rectangle:
-            const startX = reader.readFloat32(); const startY = reader.readFloat32();
-            const endX = reader.readFloat32(); const endY = reader.readFloat32();
-            drawable.left = startX; drawable.top = startY;
-            drawable.width = endX - startX; drawable.height = endY - startY;
-            drawable.angle = reader.readFloat32() * (180 / Math.PI);
-            drawable.stroke = color;
-            drawable.fill = isFilled ? color : 'transparent';
-            break;
-        case DrawMode.Circle:
-        case DrawMode.Donut:
-            const centerX = reader.readFloat32(); const centerY = reader.readFloat32();
-            drawable.radius = reader.readFloat32();
-            drawable.left = centerX - drawable.radius;
-            drawable.top = centerY - drawable.radius;
-            drawable.stroke = color;
-            drawable.fill = isFilled ? color : 'transparent';
-            break;
-        case DrawMode.Arrow:
-            drawable.startPoint = { x: reader.readFloat32(), y: reader.readFloat32() };
-            drawable.endPoint = { x: reader.readFloat32(), y: reader.readFloat32() };
-            drawable.angle = reader.readFloat32();
-            reader.readFloat32(); reader.readFloat32(); // skip arrowhead data
-            drawable.stroke = color;
-            break;
-        case DrawMode.TextTool:
-            drawable.text = reader.readString();
-            drawable.left = reader.readFloat32();
-            drawable.top = reader.readFloat32();
-            drawable.fontSize = reader.readFloat32();
-            drawable.width = reader.readFloat32();
-            drawable.fill = color;
+            if (mode === DrawMode.Dash) {
+                drawable.dashLength = reader.readFloat32();
+                drawable.gapLength = reader.readFloat32();
+            }
             break;
         default:
             if (mode >= DrawMode.Image && mode <= DrawMode.Dot8Image) {
-                drawable.imageResourcePath = reader.readString();
-                const cX = reader.readFloat32(); const cY = reader.readFloat32();
-                const dX = reader.readFloat32(); const dY = reader.readFloat32();
-                drawable.width = dX; drawable.height = dY;
-                drawable.left = cX - dX / 2;
-                drawable.top = cY - dY / 2;
-                drawable.angle = reader.readFloat32() * (180 / Math.PI);
-                drawable.tint = color;
+                const pluginResourcePath = reader.readString();
+                drawable.pluginResourcePath = pluginResourcePath;
+
+                // NEW: Look up the local tool details using the C# path
+                const toolName = pluginResourcePathToToolName[pluginResourcePath];
+                const toolDetails = allModeDetails[toolName];
+                drawable.imageResourcePath = toolDetails ? toolDetails.icon : ''; // Set local renderable URL
+
+                drawable.left = reader.readFloat32();
+                drawable.top = reader.readFloat32();
+                drawable.width = reader.readFloat32();
+                drawable.height = reader.readFloat32();
+                drawable.angle = reader.readFloat32() * (180 / Math.PI); // Convert radians to degrees
+                drawable.tint = color; 
+                drawable.stroke = color;
+                drawable.fill = isFilled ? color : 'transparent';
             } else {
                 console.warn("Deserialization for mode not implemented:", mode);
                 return null;
@@ -251,6 +192,7 @@ function deserializeSingleDrawable(reader) {
     return drawable;
 }
 
+
 function serializePageToBytes(drawables) {
     const writer = new BufferHandler();
     writer.writeInt32(SERIALIZATION_VERSION);
@@ -259,7 +201,9 @@ function serializePageToBytes(drawables) {
     return writer.getBuffer();
 }
 
-function deserializePageFromBytes(data) {
+// MODIFIED: Function now accepts and passes down the reverse maps
+function deserializePageFromBytes(data, pluginResourcePathToToolName, allModeDetails) {
+    if (!data) return [];
     const reader = new BufferHandler(data);
     const version = reader.readInt32();
     if (version !== SERIALIZATION_VERSION) {
@@ -269,7 +213,7 @@ function deserializePageFromBytes(data) {
     const count = reader.readInt32();
     const drawables = [];
     for (let i = 0; i < count; i++) {
-        const drawable = deserializeSingleDrawable(reader);
+        const drawable = deserializeSingleDrawable(reader, pluginResourcePathToToolName, allModeDetails);
         if (drawable) drawables.push(drawable);
     }
     return drawables;

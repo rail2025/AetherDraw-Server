@@ -100,20 +100,16 @@ const UIManager = (function () {
     let activeSubModeMap = {};
     let currentOpenGroup = null;
 
-    // This function builds the HTML for the toolbar from the definitions above.
     function createToolbar() {
         const container = document.getElementById('toolbar');
         if (!container) return;
         container.innerHTML = '';
-
         let gridContainer;
-
         const startNewGrid = () => {
             if (gridContainer) container.appendChild(gridContainer);
             gridContainer = document.createElement('div');
             gridContainer.className = 'tool-grid';
         };
-
         toolDefinitions.forEach(def => {
             if (def.type === 'grid') {
                 if (!gridContainer) startNewGrid();
@@ -339,6 +335,10 @@ const UIManager = (function () {
         },
         getModeDetailsByToolName: function (toolName) {
             return modeDetails[toolName] || null;
+        },
+        // NEW: Expose all mode details for the deserializer
+        getAllModeDetails: function () {
+            return modeDetails;
         }
     };
 })();
