@@ -101,52 +101,53 @@ function serializeSingleDrawable(writer, drawable) {
             writer.writeInt32(drawable.points.length);
             drawable.points.forEach(p => { writer.writeFloat32(p.x); writer.writeFloat32(p.y); });
             if (drawable.objectDrawMode === DrawMode.Dash) {
-                writer.writeFloat32(drawable.strokeWidth * 2.5); // DashLength
-                writer.writeFloat32(drawable.strokeWidth * 1.25); // GapLength
+                writer.writeFloat32(drawable.strokeWidth * 2.5);
+                writer.writeFloat32(drawable.strokeWidth * 1.25);
             }
             break;
         case DrawMode.Triangle:
-            writer.writeInt32(drawable.points.length);
-            drawable.points.forEach(p => { writer.writeFloat32(p.x); writer.writeFloat32(p.y); });
+            writer.writeFloat32(drawable.points[0].x); writer.writeFloat32(drawable.points[0].y);
+            writer.writeFloat32(drawable.points[1].x); writer.writeFloat32(drawable.points[1].y);
+            writer.writeFloat32(drawable.points[2].x); writer.writeFloat32(drawable.points[2].y);
             break;
         case DrawMode.StraightLine:
-            writer.writeFloat32(drawable.x1); writer.writeFloat32(drawable.y1);
-            writer.writeFloat32(drawable.x2); writer.writeFloat32(drawable.y2);
+            writer.writeFloat32(drawable.startPoint.x); writer.writeFloat32(drawable.startPoint.y);
+            writer.writeFloat32(drawable.endPoint.x); writer.writeFloat32(drawable.endPoint.y);
             break;
         case DrawMode.Rectangle:
             writer.writeFloat32(drawable.left); writer.writeFloat32(drawable.top);
             writer.writeFloat32(drawable.left + (drawable.width * drawable.scaleX));
             writer.writeFloat32(drawable.top + (drawable.height * drawable.scaleY));
-            writer.writeFloat32(drawable.angle * (Math.PI / 180)); // to radians
+            writer.writeFloat32(drawable.angle * (Math.PI / 180));
             break;
         case DrawMode.Circle:
         case DrawMode.Donut:
-            writer.writeFloat32(drawable.left + drawable.radius * drawable.scaleX); // center X
-            writer.writeFloat32(drawable.top + drawable.radius * drawable.scaleY); // center Y
+            writer.writeFloat32(drawable.left + drawable.radius * drawable.scaleX);
+            writer.writeFloat32(drawable.top + drawable.radius * drawable.scaleY);
             writer.writeFloat32(drawable.radius * drawable.scaleX);
             break;
         case DrawMode.Arrow:
             writer.writeFloat32(drawable.startPoint.x); writer.writeFloat32(drawable.startPoint.y);
             writer.writeFloat32(drawable.endPoint.x); writer.writeFloat32(drawable.endPoint.y);
-            writer.writeFloat32(drawable.angle); // Rotation Angle
-            writer.writeFloat32(drawable.strokeWidth * 5.0); // arrowhead length
-            writer.writeFloat32(3.0); // arrowhead width scale
+            writer.writeFloat32(drawable.angle);
+            writer.writeFloat32(drawable.strokeWidth * 5.0);
+            writer.writeFloat32(3.0);
             break;
         case DrawMode.TextTool:
             writer.writeString(drawable.text);
             writer.writeFloat32(drawable.left);
             writer.writeFloat32(drawable.top);
             writer.writeFloat32(drawable.fontSize);
-            writer.writeFloat32(drawable.width * drawable.scaleX); // wrapping width
+            writer.writeFloat32(drawable.width * drawable.scaleX);
             break;
         default:
             if (drawable.objectDrawMode >= DrawMode.Image && drawable.objectDrawMode <= DrawMode.Dot8Image) {
                 writer.writeString(drawable.imageResourcePath);
-                writer.writeFloat32(drawable.left + (drawable.width * drawable.scaleX / 2)); // center X
-                writer.writeFloat32(drawable.top + (drawable.height * drawable.scaleY / 2)); // center Y
-                writer.writeFloat32(drawable.width * drawable.scaleX); // drawSize X
-                writer.writeFloat32(drawable.height * drawable.scaleY); // drawSize Y
-                writer.writeFloat32(drawable.angle * (Math.PI / 180)); // to radians
+                writer.writeFloat32(drawable.left + (drawable.width * drawable.scaleX / 2));
+                writer.writeFloat32(drawable.top + (drawable.height * drawable.scaleY / 2));
+                writer.writeFloat32(drawable.width * drawable.scaleX);
+                writer.writeFloat32(drawable.height * drawable.scaleY);
+                writer.writeFloat32(drawable.angle * (Math.PI / 180));
             } else {
                 console.warn("Serialization for mode not implemented:", drawable.objectDrawMode);
             }
@@ -185,9 +186,11 @@ function deserializeSingleDrawable(reader) {
             drawable.gapLength = reader.readFloat32();
             break;
         case DrawMode.Triangle:
-            const trianglePointCount = reader.readInt32();
-            drawable.points = [];
-            for (let i = 0; i < trianglePointCount; i++) drawable.points.push({ x: reader.readFloat32(), y: reader.readFloat32() });
+            drawable.points = [
+                { x: reader.readFloat32(), y: reader.readFloat32() },
+                { x: reader.readFloat32(), y: reader.readFloat32() },
+                { x: reader.readFloat32(), y: reader.readFloat32() }
+            ];
             drawable.stroke = color;
             drawable.fill = isFilled ? color : 'transparent';
             break;
@@ -201,7 +204,7 @@ function deserializeSingleDrawable(reader) {
             const endX = reader.readFloat32(); const endY = reader.readFloat32();
             drawable.left = startX; drawable.top = startY;
             drawable.width = endX - startX; drawable.height = endY - startY;
-            drawable.angle = reader.readFloat32() * (180 / Math.PI); // to degrees
+            drawable.angle = reader.readFloat32() * (180 / Math.PI);
             drawable.stroke = color;
             drawable.fill = isFilled ? color : 'transparent';
             break;

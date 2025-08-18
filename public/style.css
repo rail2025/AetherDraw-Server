@@ -44,6 +44,13 @@ body {
     flex-grow: 1;
     position: relative;
     background-color: #262629;
+    overflow: hidden; /* Added to contain the canvas perfectly */
+}
+
+#konva-container {
+    width: 100%;
+    height: 100%;
+    cursor: crosshair; /* A good default cursor for a drawing app */
 }
 
 #bottom-bar {

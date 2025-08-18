@@ -1,6 +1,6 @@
 const UIManager = (function () {
-    const iconPath = (name) => `./icons/${name}`;
-
+    // This object maps tool names to their properties, like labels and icon paths.
+    // It's a data-driven way to build the UI.
     const modeDetails = {
         select: { label: 'Select' },
         eraser: { label: 'Eraser' },
@@ -11,57 +11,58 @@ const UIManager = (function () {
         emoji: { label: 'Emoji' },
         setbg: { label: 'Set BG (URL)' },
 
-        pen: { label: "Pen", icon: iconPath("Pen.svg") },
+        pen: { label: "Pen" },
         line: { label: "Line" },
         dash: { label: "Dash" },
-        rectangle: { label: "Rect", icon: iconPath("Rectangle.svg") },
+        rectangle: { label: "Rect" },
         circle: { label: "Circle" },
         arrow: { label: "Arrow" },
         cone: { label: "Cone" },
         triangle: { label: "Triangle" },
-        text: { label: "TEXT", icon: iconPath("Text.svg") },
+        text: { label: "TEXT" },
 
-        squareImage: { label: "Square", icon: iconPath("Square.png") },
-        circleMarkImage: { label: "Circle", icon: iconPath("CircleMark.png") },
-        triangleImage: { label: "Triangle", icon: iconPath("Triangle.png") },
-        plusImage: { label: "Plus", icon: iconPath("Plus.png") },
-        tankImage: { label: "Tank", icon: iconPath("Tank.jpg") },
-        healerImage: { label: "Healer", icon: iconPath("Healer.jpg") },
-        meleeImage: { label: "Melee", icon: iconPath("Melee.jpg") },
-        rangedImage: { label: "Ranged", icon: iconPath("Ranged.jpg") },
-        party1Image: { label: "P1", icon: iconPath("Party1.png") },
-        party2Image: { label: "P2", icon: iconPath("Party2.png") },
-        party3Image: { label: "P3", icon: iconPath("Party3.png") },
-        party4Image: { label: "P4", icon: iconPath("Party4.png") },
-        party5Image: { label: "P5", icon: iconPath("Party5.png") },
-        party6Image: { label: "P6", icon: iconPath("Party6.png") },
-        party7Image: { label: "P7", icon: iconPath("Party7.png") },
-        party8Image: { label: "P8", icon: iconPath("Party8.png") },
-        waymarkAImage: { label: "A", icon: iconPath("A.png") },
-        waymarkBImage: { label: "B", icon: iconPath("B.png") },
-        waymarkCImage: { label: "C", icon: iconPath("C.png") },
-        waymarkDImage: { label: "D", icon: iconPath("D.png") },
-        waymark1Image: { label: "1", icon: iconPath("1_waymark.png") },
-        waymark2Image: { label: "2", icon: iconPath("2_waymark.png") },
-        waymark3Image: { label: "3", icon: iconPath("3_waymark.png") },
-        waymark4Image: { label: "4", icon: iconPath("4_waymark.png") },
-        stackImage: { label: "Stack", icon: iconPath("stack.svg") },
-        spreadImage: { label: "Spread", icon: iconPath("spread.svg") },
-        lineStackImage: { label: "Line Stack", icon: iconPath("line_stack.svg") },
-        flareImage: { label: "Flare", icon: iconPath("flare.svg") },
-        donutAoEImage: { label: "Donut", icon: iconPath("donut.svg") },
-        circleAoEImage: { label: "AoE", icon: iconPath("prox_aoe.svg") },
-        bossImage: { label: "Boss", icon: iconPath("boss.svg") },
-        dot1Image: { label: "Dot 1", icon: iconPath("1dot.svg") },
-        dot2Image: { label: "Dot 2", icon: iconPath("2dot.svg") },
-        dot3Image: { label: "Dot 3", icon: iconPath("3dot.svg") },
-        dot4Image: { label: "Dot 4", icon: iconPath("4dot.svg") },
-        dot5Image: { label: "Dot 5", icon: iconPath("5dot.svg") },
-        dot6Image: { label: "Dot 6", icon: iconPath("6dot.svg") },
-        dot7Image: { label: "Dot 7", icon: iconPath("7dot.svg") },
-        dot8Image: { label: "Dot 8", icon: iconPath("8dot.svg") },
+        squareImage: { label: "Square", icon: "./icons/Square.png" },
+        circleMarkImage: { label: "Circle", icon: "./icons/CircleMark.png" },
+        triangleImage: { label: "Triangle", icon: "./icons/Triangle.png" },
+        plusImage: { label: "Plus", icon: "./icons/Plus.png" },
+        tankImage: { label: "Tank", icon: "./icons/Tank.jpg" },
+        healerImage: { label: "Healer", icon: "./icons/Healer.jpg" },
+        meleeImage: { label: "Melee", icon: "./icons/Melee.jpg" },
+        rangedImage: { label: "Ranged", icon: "./icons/Ranged.jpg" },
+        party1Image: { label: "P1", icon: "./icons/Party1.png" },
+        party2Image: { label: "P2", icon: "./icons/Party2.png" },
+        party3Image: { label: "P3", icon: "./icons/Party3.png" },
+        party4Image: { label: "P4", icon: "./icons/Party4.png" },
+        party5Image: { label: "P5", icon: "./icons/Party5.png" },
+        party6Image: { label: "P6", icon: "./icons/Party6.png" },
+        party7Image: { label: "P7", icon: "./icons/Party7.png" },
+        party8Image: { label: "P8", icon: "./icons/Party8.png" },
+        waymarkAImage: { label: "A", icon: "./icons/A.png" },
+        waymarkBImage: { label: "B", icon: "./icons/B.png" },
+        waymarkCImage: { label: "C", icon: "./icons/C.png" },
+        waymarkDImage: { label: "D", icon: "./icons/D.png" },
+        waymark1Image: { label: "1", icon: "./icons/1_waymark.png" },
+        waymark2Image: { label: "2", icon: "./icons/2_waymark.png" },
+        waymark3Image: { label: "3", icon: "./icons/3_waymark.png" },
+        waymark4Image: { label: "4", icon: "./icons/4_waymark.png" },
+        stackImage: { label: "Stack", icon: "./icons/stack.svg" },
+        spreadImage: { label: "Spread", icon: "./icons/spread.svg" },
+        lineStackImage: { label: "Line Stack", icon: "./icons/line_stack.svg" },
+        flareImage: { label: "Flare", icon: "./icons/flare.svg" },
+        donutAoEImage: { label: "Donut", icon: "./icons/donut.svg" },
+        circleAoEImage: { label: "AoE", icon: "./icons/prox_aoe.svg" },
+        bossImage: { label: "Boss", icon: "./icons/boss.svg" },
+        dot1Image: { label: "Dot 1", icon: "./icons/1dot.svg" },
+        dot2Image: { label: "Dot 2", icon: "./icons/2dot.svg" },
+        dot3Image: { label: "Dot 3", icon: "./icons/3dot.svg" },
+        dot4Image: { label: "Dot 4", icon: "./icons/4dot.svg" },
+        dot5Image: { label: "Dot 5", icon: "./icons/5dot.svg" },
+        dot6Image: { label: "Dot 6", icon: "./icons/6dot.svg" },
+        dot7Image: { label: "Dot 7", icon: "./icons/7dot.svg" },
+        dot8Image: { label: "Dot 8", icon: "./icons/8dot.svg" },
     };
 
+    // This defines the structure and layout of the entire toolbar.
     const toolDefinitions = [
         { type: 'grid', modes: ['select', 'eraser'] },
         { type: 'grid', modes: ['copy', 'paste'] },
@@ -99,6 +100,7 @@ const UIManager = (function () {
     let activeSubModeMap = {};
     let currentOpenGroup = null;
 
+    // This function builds the HTML for the toolbar from the definitions above.
     function createToolbar() {
         const container = document.getElementById('toolbar');
         if (!container) return;
@@ -115,7 +117,6 @@ const UIManager = (function () {
         toolDefinitions.forEach(def => {
             if (def.type === 'grid') {
                 if (!gridContainer) startNewGrid();
-
                 def.modes.forEach(mode => {
                     const btn = document.createElement('button');
                     const detail = modeDetails[mode];
@@ -136,7 +137,6 @@ const UIManager = (function () {
                 btn.id = `tool-${def.mode}`;
                 btn.className = 'full-width-btn';
                 btn.title = detail.label;
-
                 const cbName = `on${def.mode.charAt(0).toUpperCase() + def.mode.slice(1)}`;
                 if (callbacks[cbName]) {
                     btn.onclick = () => callbacks[cbName]();
@@ -144,28 +144,23 @@ const UIManager = (function () {
                     btn.onclick = () => callbacks.onToolSelect(def.mode);
                 }
                 container.appendChild(btn);
-
             } else if (def.type === 'main-grid') {
                 if (gridContainer && gridContainer.children.length > 0) container.appendChild(gridContainer);
                 gridContainer = document.createElement('div');
                 gridContainer.className = 'tool-grid';
                 gridContainer.style.gridTemplateColumns = '1fr 1fr';
-
                 def.groups.forEach(group => {
                     const btn = document.createElement('button');
                     btn.className = 'tool-group-btn';
                     btn.id = `tool-group-${group.primary}`;
                     btn.title = group.tooltip;
-
                     const activeModeInGroup = activeSubModeMap[group.primary] || group.primary;
                     const detail = modeDetails[activeModeInGroup];
-
                     if (detail && detail.icon) {
                         btn.innerHTML = `<img src="${detail.icon}" alt="${detail.label || ''}"><span>${detail.label || ''}</span>`;
                     } else if (detail) {
                         btn.innerHTML = `<span>${detail.label}</span>`;
                     }
-
                     btn.onclick = (event) => {
                         if (group.subModes && group.subModes.length > 0) {
                             renderToolOptions(group, event.currentTarget);
@@ -222,22 +217,18 @@ const UIManager = (function () {
 
     function renderToolOptions(groupDef, buttonElement) {
         const container = document.getElementById('tool-options');
-
         if (!groupDef || currentOpenGroup === groupDef.primary) {
             container.style.display = 'none';
             currentOpenGroup = null;
             return;
         }
-
         currentOpenGroup = groupDef.primary;
         container.innerHTML = '';
-
         const groupEl = document.createElement('div');
         groupEl.className = 'tool-options-group';
         const title = document.createElement('h4');
         title.textContent = groupDef.tooltip;
         groupEl.appendChild(title);
-
         groupDef.subModes.forEach(mode => {
             const btn = document.createElement('button');
             btn.id = `tool-option-${mode}`;
@@ -257,10 +248,23 @@ const UIManager = (function () {
             groupEl.appendChild(btn);
         });
         container.appendChild(groupEl);
-
         const rect = buttonElement.getBoundingClientRect();
         container.style.top = `${rect.top}px`;
         container.style.display = 'block';
+    }
+
+    function generatePassphrase() {
+        const OpinionVerbs = ["I like", "I hate", "I want", "I need", "Craving", "Seeking", "Avoiding", "Serving", "Finding", "Cooking", "Tasting", "I found", "I lost", "I traded", "He stole", "She sold", "They want", "Remembering", "Forgetting", "Questioning", "Analyzing", "Ignoring", "Praising", "Chasing", "Selling"];
+        const Adjectives = ["spicy", "creamy", "sultry", "glimmering", "ancient", "crispy", "zesty", "hearty", "fluffy", "savory", "frozen", "bubbling", "forbidden", "radiant", "somber", "dented", "gilded", "rusted", "glowing", "cracked", "smelly", "aromatic", "stale", "fresh", "bitter", "sweet", "silken", "spiky"];
+        const FfxivNouns = ["Miqote", "Lalafell", "Gridanian", "Ul'dahn", "Limsan", "Ishgardian", "Doman", "Hrothgar", "Viera", "Garlean", "Sharlayan", "Sylph", "Au Ra", "Roegadyn", "Elezen", "Thavnairian", "Coerthan", "Ala Mhigan", "Ronkan", "Eorzean", "Astrologian", "Machinist", "Samurai", "Dancer", "Paladin", "Warrior"];
+        const FoodItems = ["rolanberry pie", "LaNoscean toast", "dodo omelette", "pixieberry tea", "king salmon", "knightly bread", "stone soup", "archon burgers", "bubble chocolate", "tuna miq", "syrcus tower", "dalamud shard", "aetheryte shard", "allagan tomestone", "company seal", "gil-turtle", "cactuar needle", "malboro breath", "behemoth horn", "mandragora root", "black truffle", "popoto", "ruby tomato", "apkallu egg", "thavnairian onion"];
+        const ActionPhrases = ["in my inventory", "on the marketboard", "from a retainer", "for the Grand Company", "in a treasure chest", "from a guildhest", "at the Gold Saucer", "near the aetheryte", "without permission", "for a friend", "under the table", "with great haste", "against all odds", "for my free company", "in the goblet"];
+        const getRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
+        const phrase = `${getRandom(OpinionVerbs)} ${getRandom(Adjectives)} ${getRandom(FfxivNouns)} ${getRandom(FoodItems)} ${getRandom(ActionPhrases)}.`;
+        const input = document.getElementById('passphrase-input');
+        if (input) {
+            input.value = phrase;
+        }
     }
 
     return {
@@ -278,27 +282,24 @@ const UIManager = (function () {
             document.getElementById('close-modal-btn').addEventListener('click', this.hideLiveModal);
             document.getElementById('connect-btn').addEventListener('click', callbacks.onConnect);
             document.getElementById('disconnect-btn').addEventListener('click', callbacks.onDisconnect);
+            document.getElementById('generate-passphrase-btn').addEventListener('click', generatePassphrase);
         },
         updateToolbar: function (state) {
             document.querySelectorAll('#toolbar button').forEach(b => b.classList.remove('active'));
-
             const activeTool = state.currentToolName;
-
             let found = false;
             toolDefinitions.filter(d => d.type === 'main-grid').flatMap(d => d.groups).forEach(g => {
                 const activeModeInGroup = activeSubModeMap[g.primary];
-                if (activeModeInGroup === activeTool) {
+                if (activeModeInGroup === activeTool || g.primary === activeTool || g.subModes.includes(activeTool)) {
                     const groupBtn = document.getElementById(`tool-group-${g.primary}`);
                     if (groupBtn) groupBtn.classList.add('active');
                     found = true;
                 }
             });
-
             if (!found) {
                 const topLevelButton = document.getElementById(`tool-${activeTool}`);
                 if (topLevelButton) topLevelButton.classList.add('active');
             }
-
             document.querySelectorAll('.color-palette button').forEach(b => b.classList.toggle('active', b.dataset.color.toLowerCase() === state.brushColor.toLowerCase()));
             document.querySelectorAll('.preset-grid button').forEach(b => b.classList.toggle('active', parseFloat(b.dataset.value) === state.brushWidth));
             const fillToggle = document.querySelector('.fill-toggle');
