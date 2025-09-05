@@ -1,37 +1,18 @@
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("AetherDraw: DOM content loaded. Initializing application.");
 
-    const state = {
-        pages: [],
-        currentPageIndex: 0,
-        pageClipboard: null,
+    const appState = {
         currentToolName: 'select',
-        currentDrawMode: 9, // Corresponds to DrawMode.Select
         brushColor: '#FFFFFF',
         brushWidth: 4,
         isShapeFilled: false,
-    };
-
-    const network = new NetworkManager();
-
-    // Map from web tool names to their corresponding enum values
-    const toolNameToDrawMode = {
-        pen: 0, line: 1, rectangle: 2, circle: 3, arrow: 4, cone: 5, dash: 6, donut: 7, triangle: 8,
-        select: 9, eraser: 10,
-        squareImage: 33, circleMarkImage: 35, triangleImage: 32, plusImage: 34,
-        tankImage: 28, healerImage: 29, meleeImage: 30, rangedImage: 31,
-        party1Image: 36, party2Image: 37, party3Image: 38, party4Image: 39,
-        party5Image: 40, party6Image: 41, party7Image: 42, party8Image: 43,
-        waymarkAImage: 24, waymarkBImage: 25, waymarkCImage: 26, waymarkDImage: 27,
-        waymark1Image: 20, waymark2Image: 21, waymark3Image: 22, waymark4Image: 23,
-        text: 44, emoji: 12,
-        stackImage: 19, spreadImage: 18, lineStackImage: 17, flareImage: 16,
-        donutAoEImage: 15, circleAoEImage: 14, bossImage: 13,
-        dot1Image: 50, dot2Image: 51, dot3Image: 52, dot4Image: 53,
-        dot5Image: 54, dot6Image: 55, dot7Image: 56, dot8Image: 57
+        selectedDrawables: [],
+        hoveredDrawable: null,
+        isErasing: false,
+        lastEraseTime: 0,
     };
     
-    // NEW: Map from web tool names to the C# plugin's embedded resource paths
+    const pendingEchoIds = new Set();
+
     const toolNameToPluginResourcePath = {
         bossImage: 'PluginImages.svg.boss.svg',
         circleAoEImage: 'PluginImages.svg.prox_aoe.svg',
@@ -74,197 +55,339 @@ document.addEventListener('DOMContentLoaded', () => {
         dot8Image: 'PluginImages.svg.8dot.svg',
     };
 
-    // NEW: Reverse map for deserialization, built dynamically after UI is initialized
-    let pluginResourcePathToToolName = {};
+    const pageManager = PageManager;
+    const undoManager = UndoManager;
+    const networkManager = new NetworkManager();
+    const canvasManager = CanvasManager;
+    const canvasController = CanvasController;
+    const shapeInteractionHandler = ShapeInteractionHandler;
+    const inPlaceTextEditor = InPlaceTextEditor;
+    const uiManager = UIManager;
 
-    const app = {
-        getCurrentPage: () => state.pages[state.currentPageIndex],
-
+    const uiCallbacks = {
+        onToolSelect: (toolName) => {
+            console.log(`[app.js] onToolSelect received tool: '${toolName}'`);
+            appState.currentToolName = toolName;
+            console.log(`[app.js] appState.currentToolName is now: '${appState.currentToolName}'`);
+            uiManager.updateToolbar(appState);
+            canvasManager.updateSelection([]);
+            appState.selectedDrawables = [];
+            controllerCallbacks.onStateChanged();
+        },
+        onColorChange: (color) => {
+            appState.brushColor = color;
+            uiManager.updateToolbar(appState);
+        },
+        onThicknessChange: (thickness) => {
+            appState.brushWidth = parseFloat(thickness);
+            uiManager.updateToolbar(appState);
+        },
+        onFillToggle: () => {
+            appState.isShapeFilled = !appState.isShapeFilled;
+            uiManager.updateToolbar(appState);
+        },
         onUndo: () => {
-            console.log("Undo action triggered.");
+            const undoneState = undoManager.undo();
+            if (undoneState) {
+                pageManager.setCurrentPageDrawables(undoneState);
+                if (networkManager.isConnected) {
+                    const payload = {
+                        pageIndex: pageManager.getCurrentPageIndex(),
+                        action: PayloadActionType.ReplacePage,
+                        data: DrawableSerializer.serializePageToBytes(undoneState)
+                    };
+                    networkManager.sendStateUpdateAsync(payload);
+                }
+                controllerCallbacks.onStateChanged();
+            }
         },
         onClearAll: () => {
-            console.log("Clear All action triggered.");
-            const page = app.getCurrentPage();
-            if (page) {
-                page.drawables = [];
-                CanvasManager.renderPage(page);
-            }
-        },
-        onToolSelect: (toolName) => {
-            state.currentToolName = toolName;
-            state.currentDrawMode = toolNameToDrawMode[toolName];
-            console.log(`Tool selected: ${toolName}, DrawMode: ${state.currentDrawMode}`);
-            CanvasManager.updateSelectionMode(state.currentToolName === 'select');
-            UIManager.updateToolbar(state);
-        },
-        onCanvasMouseDown: (pointer, target) => {
-            const toolDetails = UIManager.getModeDetailsByToolName(state.currentToolName);
-
-            if (toolDetails && toolDetails.icon) {
-                const pluginResourcePath = toolNameToPluginResourcePath[state.currentToolName];
-                if (!pluginResourcePath) {
-                    console.error(`AetherDraw Error: No pluginResourcePath found for tool '${state.currentToolName}'. Check toolNameToPluginResourcePath map.`);
-                    return;
-                }
-                console.log(`Placing image: ${state.currentToolName} with local URL '${toolDetails.icon}' and plugin path '${pluginResourcePath}'`);
-                CanvasManager.placeImage(pointer, toolDetails.icon, state.currentToolName, state.currentDrawMode, pluginResourcePath);
-                app.onToolSelect('select');
-            }
-            else if (state.currentToolName !== 'select') {
-                const options = {
-                    drawMode: state.currentDrawMode,
-                    color: state.brushColor,
-                    strokeWidth: state.brushWidth,
-                    fill: state.isShapeFilled ? state.brushColor : 'transparent'
-                };
-                CanvasManager.startDrawing(state.currentToolName, pointer, options);
-            }
-        },
-        onObjectAdded: (drawable, preventRerender = false) => {
-            if (!drawable) {
-                console.error("AetherDraw Error: onObjectAdded received a null drawable.");
-                return;
-            }
-            console.log("Local: Adding object to page", drawable);
-            app.getCurrentPage().drawables.push(drawable);
-
-            // MODIFIED: Send new object over the network if connected
-            if (network.isConnected()) {
-                try {
-                    console.log("Network: Preparing to send new object", drawable);
-                    const objectBytes = serializePageToBytes([drawable]); 
-                    const payload = {
-                        pageIndex: state.currentPageIndex,
-                        action: PayloadActionType.AddObjects,
-                        data: objectBytes,
+            const currentPage = pageManager.getCurrentPageDrawables();
+            if (currentPage.length > 0) {
+                undoManager.recordAction(currentPage, "Clear All");
+                currentPage.length = 0;
+                if (networkManager.isConnected) {
+                     const payload = {
+                        pageIndex: pageManager.getCurrentPageIndex(),
+                        action: PayloadActionType.ClearPage,
+                        data: null
                     };
-                    network.sendStateUpdate(payload);
-                    console.log("Network: New object sent successfully.");
-                } catch (ex) {
-                    console.error("AetherDraw Error: Failed to serialize and send new object.", ex);
+                    networkManager.sendStateUpdateAsync(payload);
                 }
+                controllerCallbacks.onStateChanged();
             }
-
-            if (!preventRerender) {
-                CanvasManager.renderPage(app.getCurrentPage());
-            }
-        },
-        onObjectModified: (drawable) => {
-            console.log("Object modified:", drawable);
-        },
-        onObjectsDeleted: (ids) => {
-            console.log("Objects deleted:", ids);
         },
         onAddPage: () => {
-            const newPageName = (state.pages.length + 1).toString();
-            state.pages.push({ name: newPageName, drawables: [], undoStack: [] });
-            app.onPageSwitch(state.pages.length - 1);
-        },
-        onPageSwitch: (index) => {
-            if (index >= 0 && index < state.pages.length) {
-                state.currentPageIndex = index;
-                console.log(`Switched to page index ${index}`);
-                CanvasManager.renderPage(app.getCurrentPage());
-                UIManager.renderPageTabs(state.pages, state.currentPageIndex, app.onPageSwitch);
-            } else {
-                console.error(`AetherDraw Error: Attempted to switch to invalid page index ${index}.`);
-            }
+            pageManager.addNewPage();
+            undoManager.clearHistory();
+            uiManager.renderPageTabs(pageManager.getAllPages(), pageManager.getCurrentPageIndex(), uiCallbacks.onPageSwitch);
+            controllerCallbacks.onStateChanged();
         },
         onDeletePage: () => {
-            if (state.pages.length > 1) {
-                state.pages.splice(state.currentPageIndex, 1);
-                const newIndex = Math.min(state.pages.length - 1, state.currentPageIndex);
-                app.onPageSwitch(newIndex);
-            }
+            pageManager.deleteCurrentPage();
+            undoManager.clearHistory();
+            uiManager.renderPageTabs(pageManager.getAllPages(), pageManager.getCurrentPageIndex(), uiCallbacks.onPageSwitch);
+            controllerCallbacks.onStateChanged();
         },
-        onColorChange: (color) => { state.brushColor = color; UIManager.updateToolbar(state); },
-        onThicknessChange: (thickness) => { state.brushWidth = thickness; UIManager.updateToolbar(state); },
-        onFillToggle: () => { state.isShapeFilled = !state.isShapeFilled; UIManager.updateToolbar(state); },
+        onCopyPage: () => {
+             pageManager.copyCurrentPageToClipboard();
+             uiManager.setPasteButtonEnabled(pageManager.hasCopiedPage());
+        },
+        onPastePage: () => {
+            undoManager.recordAction(pageManager.getCurrentPageDrawables(), "Paste Page");
+            pageManager.pastePageFromClipboard();
+            if(networkManager.isConnected){
+                 const payload = {
+                    pageIndex: pageManager.getCurrentPageIndex(),
+                    action: PayloadActionType.ReplacePage,
+                    data: PlanSerializer.serializePageToBytes(pageManager.getCurrentPageDrawables())
+                };
+                networkManager.sendStateUpdateAsync(payload);
+            }
+            controllerCallbacks.onStateChanged();
+        },
+        onPageSwitch: (index) => {
+            pageManager.switchToPage(index);
+            undoManager.clearHistory();
+            appState.selectedDrawables = [];
+            canvasController.setCurrentPageDrawables(pageManager.getCurrentPageDrawables());
+            uiManager.renderPageTabs(pageManager.getAllPages(), pageManager.getCurrentPageIndex(), uiCallbacks.onPageSwitch);
+            controllerCallbacks.onStateChanged();
+        },
         onConnect: () => {
-            const passphrase = UIManager.getPassphraseInput();
+            const passphrase = uiManager.getPassphraseInput();
             if (passphrase) {
-                UIManager.updateConnectionStatus("Connecting...");
-                network.connect('wss://aetherdraw-server.onrender.com/ws', passphrase);
+                uiManager.updateConnectionStatus("Connecting...");
+                networkManager.connectAsync('wss://aetherdraw-server.onrender.com/ws', passphrase);
             }
         },
-        onDisconnect: () => { network.disconnect(); },
-        isNetworkConnected: () => network.isConnected(),
+        onDisconnect: () => networkManager.disconnectAsync(),
+        isNetworkConnected: () => networkManager.isConnected,
     };
 
-    network.onConnected = () => { UIManager.updateConnectionStatus("Connected"); UIManager.hideLiveModal(); };
-    network.onDisconnected = () => { UIManager.updateConnectionStatus("Disconnected"); };
-    network.onError = (err) => { UIManager.updateConnectionStatus(`Error: ${err}`); };
+    const controllerCallbacks = {
+        onDrawingStarted: () => {
+            undoManager.recordAction(pageManager.getCurrentPageDrawables());
+        },
+        onDrawingCancelled: () => {
+            const undoneState = undoManager.undo();
+            if (undoneState) {
+                pageManager.setCurrentPageDrawables(undoneState);
+            }
+            controllerCallbacks.onStateChanged();
+        },
+        onObjectAdded: (drawable, isAtomic = false) => {
+            if (isAtomic) {
+                undoManager.recordAction(pageManager.getCurrentPageDrawables());
+            }
+            pageManager.getCurrentPageDrawables().push(drawable);
+            
+            // Add the new object's ID to the ignore list to prevent echo.
+            pendingEchoIds.add(drawable.uniqueId);
+            setTimeout(() => pendingEchoIds.delete(drawable.uniqueId), 500);
 
-    network.onStateUpdateReceived = (payload) => {
-        console.log("Network: Received state update payload.", payload);
-        if (!payload || payload.data === undefined) {
-            console.error("AetherDraw Error: Received invalid payload.");
-            return;
+            if (networkManager.isConnected) {
+                const payload = {
+                    pageIndex: pageManager.getCurrentPageIndex(),
+                    action: PayloadActionType.AddObjects,
+                    data: DrawableSerializer.serializePageToBytes([drawable]),
+                };
+                networkManager.sendStateUpdateAsync(payload);
+            }
+            controllerCallbacks.onStateChanged();
+        },
+        onStateChanged: (isQuickUpdate = false, previewDrawable = null) => {
+            // By removing the setTimeout, we make the entire render process
+            // synchronous and predictable, which fixes the ghosting bug.
+            canvasManager.renderPage(pageManager.getCurrentPageDrawables(), isQuickUpdate, previewDrawable);
+            canvasManager.updateSelection(appState.selectedDrawables);
+        },
+        getToolDetails: (toolName) => uiManager.getModeDetailsByToolName(toolName),
+        onNewShapeDrawn: (shape) => {
+        console.log("app.js: onNewShapeDrawn callback triggered.");
+        canvasManager.addTemporaryShape(shape);
+        },
+        onObjectDeleted: (deletedObjectIds) => {
+            const drawables = pageManager.getCurrentPageDrawables();
+            undoManager.recordAction(drawables, "Erase Object(s)");
+
+            const newDrawables = drawables.filter(d => !deletedObjectIds.includes(d.uniqueId));
+            pageManager.setCurrentPageDrawables(newDrawables);
+            canvasController.setCurrentPageDrawables(newDrawables);
+
+            if (networkManager.isConnected) {
+                // TODO: Implement network call for deletion sync
+            }
+            controllerCallbacks.onStateChanged();
         }
+    };
+    
+    const interactionHandlerCallbacks = {
+        onObjectsCommitted: (modifiedDrawables) => {
+            if (modifiedDrawables && modifiedDrawables.length > 0) {
+                modifiedDrawables.forEach(d => {
+                    pendingEchoIds.add(d.uniqueId);
+                    setTimeout(() => pendingEchoIds.delete(d.uniqueId), 500);
+                });
 
-        try {
-            if (payload.action === PayloadActionType.AddObjects && payload.data) {
-                const newDrawables = deserializePageFromBytes(payload.data, pluginResourcePathToToolName, UIManager.getAllModeDetails());
-                console.log("Network: Deserialized new objects to add:", newDrawables);
-                
-                while(state.pages.length <= payload.pageIndex){
-                    app.onAddPage();
-                }
-                state.pages[payload.pageIndex].drawables.push(...newDrawables);
-
-                if (payload.pageIndex === state.currentPageIndex) {
-                    CanvasManager.renderPage(app.getCurrentPage());
-                }
-            } else if (payload.action === PayloadActionType.ReplacePage && payload.data) {
-                const newDrawables = deserializePageFromBytes(payload.data, pluginResourcePathToToolName, UIManager.getAllModeDetails());
-                console.log("Network: Deserialized objects to replace page:", newDrawables);
-                
-                while(state.pages.length <= payload.pageIndex){
-                    app.onAddPage();
-                }
-                state.pages[payload.pageIndex].drawables = newDrawables;
-
-                if (payload.pageIndex === state.currentPageIndex) {
-                    CanvasManager.renderPage(app.getCurrentPage());
+                if (networkManager.isConnected) {
+                    const payload = {
+                        pageIndex: pageManager.getCurrentPageIndex(),
+                        action: PayloadActionType.UpdateObjects,
+                        data: DrawableSerializer.serializePageToBytes(modifiedDrawables),
+                    };
+                    networkManager.sendStateUpdateAsync(payload);
                 }
             }
-        } catch (ex) {
-            console.error("AetherDraw Error: Failed to process received network payload.", ex);
+            // The final re-render after committing data is still needed.
+            controllerCallbacks.onStateChanged(false);
+        },
+        onObjectsUpdatedLive: (modifiedDrawables) => {
+            // Live updates during a drag must trigger a full re-render,
+            // not a quick/preview render, to ensure state consistency.
+            controllerCallbacks.onStateChanged(false); 
+        },
+        onSelectionChange: (newSelection) => {
+            appState.selectedDrawables = newSelection;
+            controllerCallbacks.onStateChanged();
         }
     };
 
-    const callbacks = {
-        onToolSelect: app.onToolSelect,
-        onUndo: app.onUndo,
-        onClearAll: app.onClearAll,
-        onAddPage: app.onAddPage,
-        onDeletePage: app.onDeletePage,
-        onPageSwitch: app.onPageSwitch,
-        onColorChange: app.onColorChange,
-        onThicknessChange: app.onThicknessChange,
-        onFillToggle: app.onFillToggle,
-        onConnect: app.onConnect,
-        onDisconnect: app.onDisconnect,
-        isNetworkConnected: app.isNetworkConnected,
+    networkManager.onConnected = () => {
+        pageManager.enterLiveMode();
+        uiManager.updateConnectionStatus("Connected");
+        uiManager.hideLiveModal();
+        uiCallbacks.onPageSwitch(0);
+    };
+    networkManager.onDisconnected = () => {
+        pageManager.exitLiveMode();
+        uiManager.updateConnectionStatus("Disconnected");
+        uiCallbacks.onPageSwitch(0);
+    };
+    networkManager.onError = (err) => uiManager.updateConnectionStatus(`Error: ${err}`);
+    networkManager.onStateUpdateReceived = (payload) => {
+        const allPages = pageManager.getAllPages();
+        if (payload.pageIndex < 0) return;
+
+        while (allPages.length <= payload.pageIndex) {
+            pageManager.addNewPage(false);
+        }
+        
+        const targetPageDrawables = allPages[payload.pageIndex].drawables;
+
+        switch (payload.action) {
+            case PayloadActionType.AddObjects: { 
+                const receivedObjects = DrawableSerializer.deserializePageFromBytes(payload.data);
+                const filteredObjects = receivedObjects.filter(obj => !pendingEchoIds.has(obj.uniqueId));
+                if (filteredObjects.length > 0) {
+                    targetPageDrawables.push(...filteredObjects);
+                } else {
+                    return;
+                }
+                break;
+            } 
+
+            case PayloadActionType.DeleteObjects: { 
+                const guidsToDelete = PlanSerializer.deserializeGuids(payload.data);
+                for (let i = targetPageDrawables.length - 1; i >= 0; i--) {
+                    if (guidsToDelete.includes(targetPageDrawables[i].uniqueId)) {
+                        targetPageDrawables.splice(i, 1);
+                    }
+                }
+                break;
+            } 
+
+            case PayloadActionType.UpdateObjects: { 
+                const updatedObjects = DrawableSerializer.deserializePageFromBytes(payload.data);
+                const filteredObjects = updatedObjects.filter(updatedObj => 
+                    !pendingEchoIds.has(updatedObj.uniqueId)
+                );
+                if (filteredObjects.length < updatedObjects.length) {
+                    console.log("[Network] Ignored echo for updated object(s).");
+                }
+                if (filteredObjects.length > 0) {
+                    filteredObjects.forEach(updatedObj => {
+                        const index = targetPageDrawables.findIndex(d => d.uniqueId === updatedObj.uniqueId);
+                        if (index !== -1) {
+                            targetPageDrawables[index] = updatedObj;
+                        } else {
+                            targetPageDrawables.push(updatedObj);
+                        }
+                    });
+                } else {
+                    return;
+                }
+                break;
+            } 
+
+            case PayloadActionType.ClearPage:
+                targetPageDrawables.length = 0;
+                break;
+            
+            case PayloadActionType.ReplacePage:
+                allPages[payload.pageIndex].drawables = DrawableSerializer.deserializePageFromBytes(payload.data);
+                break;
+        }
+
+        if (payload.pageIndex === pageManager.getCurrentPageIndex()) {
+            controllerCallbacks.onStateChanged();
+        }
     };
 
-    UIManager.initialize(callbacks);
-    CanvasManager.initialize({
-        onObjectAdded: app.onObjectAdded,
-        onObjectModified: app.onObjectModified,
-        onObjectsDeleted: app.onObjectsDeleted,
-        onCanvasMouseDown: app.onCanvasMouseDown,
-    });
-    
-    // NEW: Build the reverse map for deserialization after the UI Manager is initialized
-    pluginResourcePathToToolName = Object.entries(toolNameToPluginResourcePath)
-        .reduce((acc, [key, value]) => {
-            acc[value] = key;
-            return acc;
-        }, {});
-    console.log("AetherDraw: Reverse map for deserialization created.", pluginResourcePathToToolName);
 
-    app.onAddPage();
-    console.log("AetherDraw: Application initialization complete.");
+    const canvasCallbacks = {
+        onCanvasMouseDown: (e) => {
+            console.log(`[app.js] Canvas mouse down detected. Current tool is: '${appState.currentToolName}'`);
+            if (inPlaceTextEditor.isEditing()) return;
+            
+            // Determine if the click was on a shape or the empty background (the stage)
+            const isShapeClick = e.target !== e.target.getStage();
+
+            if (appState.currentToolName === 'select') {
+                // If the select tool is active, perform selection/deselection.
+                if (isShapeClick) {
+                    shapeInteractionHandler.handleDragInitiation(e);
+                } else {
+                    shapeInteractionHandler.handleBackgroundClick(e);
+                }
+            } else {
+                // If ANY other tool (drawing, icon, etc.) is active,
+                // let the canvasController handle it to create the new object.
+                canvasController.handleMouseDown(e);
+            }
+        },
+        onCanvasMouseMove: (e) => {
+            // Pass the mousemove event to BOTH controllers.
+            // Each controller has internal checks to know if it should respond.
+            //canvasController.handleMouseMove(e);      // Handles drawing previews.
+            //shapeInteractionHandler.handleCustomDrag(e); // Handles dragging selected objects.
+            // By checking the state, we prevent the drawing controller
+            // from running and creating a ghost image during a drag.
+            if (shapeInteractionHandler.isDragging()) {
+                shapeInteractionHandler.handleCustomDrag(e);
+            } else {
+                canvasController.handleMouseMove(e);
+            }
+        },
+        onCanvasMouseUp: (e) => {
+            // Pass the mouseup event to BOTH controllers.
+            canvasController.handleMouseUp(e);          // Finalizes a new drawing.
+            shapeInteractionHandler.handleDragTermination(e); // Finalizes a drag.
+        }
+    };
+    
+    pageManager.initialize();
+    undoManager.clearHistory();
+    uiManager.initialize(uiCallbacks);
+    TextureManager.initialize({
+        onLoad: () => {
+            controllerCallbacks.onStateChanged();
+        }
+    });
+    canvasManager.initialize(canvasCallbacks, shapeInteractionHandler);
+    canvasController.initialize(appState, controllerCallbacks, pageManager.getCurrentPageDrawables(), uiCallbacks.onToolSelect);
+    shapeInteractionHandler.initialize(undoManager, pageManager, appState, interactionHandlerCallbacks);
+    inPlaceTextEditor.initialize(undoManager, pageManager, { ...interactionHandlerCallbacks, onUpdateObject: interactionHandlerCallbacks.onObjectsModified });
+
+    uiCallbacks.onPageSwitch(0);
 });

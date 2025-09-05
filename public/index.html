@@ -48,9 +48,38 @@
     </div>
 
     <script src="https://unpkg.com/konva@9.3.6/konva.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
 
-    <script src="serialization.js"></script>
-    <script src="network.js"></script>
+    <script src="drawinglogic/drawMode.js"></script>
+    <script src="networking/messageContracts.js"></script>
+    <script src="drawinglogic/hitDetection.js"></script>
+    <script src="drawinglogic/inputSanitizer.js"></script>
+    <script src="drawinglogic/emojiRenderer.js"></script>
+
+    <script src="drawinglogic/baseDrawable.js"></script>
+    <script src="drawinglogic/drawableImage.js"></script>
+    <script src="drawinglogic/drawableStraightLine.js"></script>
+    <script src="drawinglogic/drawableTriangle.js"></script>
+    <script src="drawinglogic/drawableArrow.js"></script>
+    <script src="drawinglogic/drawableText.js"></script>
+    <script src="drawinglogic/drawableRectangle.js"></script>
+    <script src="drawinglogic/drawablePath.js"></script>
+    <script src="drawinglogic/drawableCircle.js"></script>
+    <script src="drawinglogic/drawableCone.js"></script>
+    <script src="drawinglogic/drawableFactory.js"></script>
+
+    <script src="serialization/drawableSerializer.js"></script>
+    <script src="serialization/payloadSerializer.js"></script>
+    <script src="serialization/planSerializer.js"></script>
+    
+    <script src="core/PageManager.js"></script>
+    <script src="core/UndoManager.js"></script>
+    <script src="networking/networkManager.js"></script>
+    <script src="drawinglogic/textureManager.js"></script>
+    <script src="drawinglogic/inPlaceTextEditor.js"></script>
+    <script src="core/canvasController.js"></script>
+    <script src="drawinglogic/shapeInteractionHandler.js"></script>
+    
     <script src="ui.js"></script>
     <script src="canvas.js"></script>
     <script src="app.js"></script>

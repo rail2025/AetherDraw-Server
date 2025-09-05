@@ -44,13 +44,13 @@ body {
     flex-grow: 1;
     position: relative;
     background-color: #262629;
-    overflow: hidden; /* Added to contain the canvas perfectly */
+    overflow: hidden;
 }
 
 #konva-container {
     width: 100%;
     height: 100%;
-    cursor: crosshair; /* A good default cursor for a drawing app */
+    cursor: crosshair;
 }
 
 #bottom-bar {
@@ -89,7 +89,6 @@ body {
         padding: 0 8px;
     }
 
-/* --- Grids & Buttons --- */
 .tool-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -156,7 +155,6 @@ button, .button-link {
         margin-bottom: 2px;
     }
 
-/* --- Tool Options / Popups --- */
 .tool-options-group {
     display: flex;
     flex-direction: column;
@@ -183,7 +181,6 @@ button, .button-link {
             object-fit: contain;
         }
 
-/* --- Toggles, Presets, Labels --- */
 .fill-toggle {
     display: flex;
     align-items: center;
@@ -228,7 +225,6 @@ button, .button-link {
     margin: 10px 0;
 }
 
-/* --- Footer & Modals --- */
 .footer {
     margin-top: auto;
     padding-top: 10px;
@@ -286,4 +282,30 @@ button, .button-link {
     font-style: italic;
     color: #aaa;
     text-align: center;
+}
+
+.aether-text-editor {
+    position: absolute;
+    z-index: 100;
+    background-color: #3a3a3a;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 8px;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+.aether-text-editor textarea {
+    background-color: #222;
+    color: #eee;
+    border: 1px solid #555;
+    border-radius: 2px;
+    resize: none;
+    width: 250px;
+    height: 80px;
+}
+.aether-text-editor .editor-buttons {
+    display: flex;
+    gap: 5px;
 }

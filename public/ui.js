@@ -1,88 +1,85 @@
 const UIManager = (function () {
-    // This object maps tool names to their properties, like labels and icon paths.
-    // It's a data-driven way to build the UI.
     const modeDetails = {
-        select: { label: 'Select' },
-        eraser: { label: 'Eraser' },
-        copy: { label: 'Copy' },
-        paste: { label: 'Paste' },
-        undo: { label: 'Undo' },
-        clearAll: { label: 'Clear All' },
-        emoji: { label: 'Emoji' },
-        setbg: { label: 'Set BG (URL)' },
+        Select: { label: 'Select' },
+        Eraser: { label: 'Eraser' },
+        Copy: { label: 'Copy' },
+        Paste: { label: 'Paste' },
+        Undo: { label: 'Undo' },
+        ClearAll: { label: 'Clear All' },
+        Emoji: { label: 'Emoji' },
+        SetBG: { label: 'Set BG (URL)' },
 
-        pen: { label: "Pen" },
-        line: { label: "Line" },
-        dash: { label: "Dash" },
-        rectangle: { label: "Rect" },
-        circle: { label: "Circle" },
-        arrow: { label: "Arrow" },
-        cone: { label: "Cone" },
-        triangle: { label: "Triangle" },
-        text: { label: "TEXT" },
+        Pen: { label: "Pen" },
+        StraightLine: { label: "Line" },
+        Dash: { label: "Dash" },
+        Rectangle: { label: "Rect" },
+        Circle: { label: "Circle" },
+        Arrow: { label: "Arrow" },
+        Cone: { label: "Cone" },
+        Triangle: { label: "Triangle" },
+        TextTool: { label: "TEXT" },
 
-        squareImage: { label: "Square", icon: "./icons/Square.png" },
-        circleMarkImage: { label: "Circle", icon: "./icons/CircleMark.png" },
-        triangleImage: { label: "Triangle", icon: "./icons/Triangle.png" },
-        plusImage: { label: "Plus", icon: "./icons/Plus.png" },
-        tankImage: { label: "Tank", icon: "./icons/Tank.jpg" },
-        healerImage: { label: "Healer", icon: "./icons/Healer.jpg" },
-        meleeImage: { label: "Melee", icon: "./icons/Melee.jpg" },
-        rangedImage: { label: "Ranged", icon: "./icons/Ranged.jpg" },
-        party1Image: { label: "P1", icon: "./icons/Party1.png" },
-        party2Image: { label: "P2", icon: "./icons/Party2.png" },
-        party3Image: { label: "P3", icon: "./icons/Party3.png" },
-        party4Image: { label: "P4", icon: "./icons/Party4.png" },
-        party5Image: { label: "P5", icon: "./icons/Party5.png" },
-        party6Image: { label: "P6", icon: "./icons/Party6.png" },
-        party7Image: { label: "P7", icon: "./icons/Party7.png" },
-        party8Image: { label: "P8", icon: "./icons/Party8.png" },
-        waymarkAImage: { label: "A", icon: "./icons/A.png" },
-        waymarkBImage: { label: "B", icon: "./icons/B.png" },
-        waymarkCImage: { label: "C", icon: "./icons/C.png" },
-        waymarkDImage: { label: "D", icon: "./icons/D.png" },
-        waymark1Image: { label: "1", icon: "./icons/1_waymark.png" },
-        waymark2Image: { label: "2", icon: "./icons/2_waymark.png" },
-        waymark3Image: { label: "3", icon: "./icons/3_waymark.png" },
-        waymark4Image: { label: "4", icon: "./icons/4_waymark.png" },
-        stackImage: { label: "Stack", icon: "./icons/stack.svg" },
-        spreadImage: { label: "Spread", icon: "./icons/spread.svg" },
-        lineStackImage: { label: "Line Stack", icon: "./icons/line_stack.svg" },
-        flareImage: { label: "Flare", icon: "./icons/flare.svg" },
-        donutAoEImage: { label: "Donut", icon: "./icons/donut.svg" },
-        circleAoEImage: { label: "AoE", icon: "./icons/prox_aoe.svg" },
-        bossImage: { label: "Boss", icon: "./icons/boss.svg" },
-        dot1Image: { label: "Dot 1", icon: "./icons/1dot.svg" },
-        dot2Image: { label: "Dot 2", icon: "./icons/2dot.svg" },
-        dot3Image: { label: "Dot 3", icon: "./icons/3dot.svg" },
-        dot4Image: { label: "Dot 4", icon: "./icons/4dot.svg" },
-        dot5Image: { label: "Dot 5", icon: "./icons/5dot.svg" },
-        dot6Image: { label: "Dot 6", icon: "./icons/6dot.svg" },
-        dot7Image: { label: "Dot 7", icon: "./icons/7dot.svg" },
-        dot8Image: { label: "Dot 8", icon: "./icons/8dot.svg" },
+        SquareImage: { label: "Square", imageResourcePath: "./icons/Square.png", pluginResourcePath: "PluginImages.toolbar.Square.png" },
+        CircleMarkImage: { label: "Circle", imageResourcePath: "./icons/CircleMark.png", pluginResourcePath: "PluginImages.toolbar.CircleMark.png" },
+        TriangleImage: { label: "Triangle", imageResourcePath: "./icons/Triangle.png", pluginResourcePath: "PluginImages.toolbar.Triangle.png" },
+        PlusImage: { label: "Plus", imageResourcePath: "./icons/Plus.png", pluginResourcePath: "PluginImages.toolbar.Plus.png" },
+        RoleTankImage: { label: "Tank", imageResourcePath: "./icons/Tank.jpg", pluginResourcePath: "PluginImages.toolbar.Tank.JPG" },
+        RoleHealerImage: { label: "Healer", imageResourcePath: "./icons/Healer.jpg", pluginResourcePath: "PluginImages.toolbar.Healer.JPG" },
+        RoleMeleeImage: { label: "Melee", imageResourcePath: "./icons/Melee.jpg", pluginResourcePath: "PluginImages.toolbar.Melee.JPG" },
+        RoleRangedImage: { label: "Ranged", imageResourcePath: "./icons/Ranged.jpg", pluginResourcePath: "PluginImages.toolbar.Ranged.JPG" },
+        Party1Image: { label: "P1", imageResourcePath: "./icons/Party1.png", pluginResourcePath: "PluginImages.toolbar.Party1.png" },
+        Party2Image: { label: "P2", imageResourcePath: "./icons/Party2.png", pluginResourcePath: "PluginImages.toolbar.Party2.png" },
+        Party3Image: { label: "P3", imageResourcePath: "./icons/Party3.png", pluginResourcePath: "PluginImages.toolbar.Party3.png" },
+        Party4Image: { label: "P4", imageResourcePath: "./icons/Party4.png", pluginResourcePath: "PluginImages.toolbar.Party4.png" },
+        Party5Image: { label: "P5", imageResourcePath: "./icons/Party5.png", pluginResourcePath: "PluginImages.toolbar.Party5.png" },
+        Party6Image: { label: "P6", imageResourcePath: "./icons/Party6.png", pluginResourcePath: "PluginImages.toolbar.Party6.png" },
+        Party7Image: { label: "P7", imageResourcePath: "./icons/Party7.png", pluginResourcePath: "PluginImages.toolbar.Party7.png" },
+        Party8Image: { label: "P8", imageResourcePath: "./icons/Party8.png", pluginResourcePath: "PluginImages.toolbar.Party8.png" },
+        WaymarkAImage: { label: "A", imageResourcePath: "./icons/A.png", pluginResourcePath: "PluginImages.toolbar.A.png" },
+        WaymarkBImage: { label: "B", imageResourcePath: "./icons/B.png", pluginResourcePath: "PluginImages.toolbar.B.png" },
+        WaymarkCImage: { label: "C", imageResourcePath: "./icons/C.png", pluginResourcePath: "PluginImages.toolbar.C.png" },
+        WaymarkDImage: { label: "D", imageResourcePath: "./icons/D.png", pluginResourcePath: "PluginImages.toolbar.D.png" },
+        Waymark1Image: { label: "1", imageResourcePath: "./icons/1_waymark.png", pluginResourcePath: "PluginImages.toolbar.1_waymark.png" },
+        Waymark2Image: { label: "2", imageResourcePath: "./icons/2_waymark.png", pluginResourcePath: "PluginImages.toolbar.2_waymark.png" },
+        Waymark3Image: { label: "3", imageResourcePath: "./icons/3_waymark.png", pluginResourcePath: "PluginImages.toolbar.3_waymark.png" },
+        Waymark4Image: { label: "4", imageResourcePath: "./icons/4_waymark.png", pluginResourcePath: "PluginImages.toolbar.4_waymark.png" },
+        StackImage: { label: "Stack", imageResourcePath: "./icons/stack.svg", pluginResourcePath: "PluginImages.svg.stack.svg" },
+        SpreadImage: { label: "Spread", imageResourcePath: "./icons/spread.svg", pluginResourcePath: "PluginImages.svg.spread.svg" },
+        LineStackImage: { label: "Line Stack", imageResourcePath: "./icons/line_stack.svg", pluginResourcePath: "PluginImages.svg.line_stack.svg" },
+        FlareImage: { label: "Flare", imageResourcePath: "./icons/flare.svg", pluginResourcePath: "PluginImages.svg.flare.svg" },
+        DonutAoEImage: { label: "Donut", imageResourcePath: "./icons/donut.svg", pluginResourcePath: "PluginImages.svg.donut.svg" },
+        CircleAoEImage: { label: "AoE", imageResourcePath: "./icons/prox_aoe.svg", pluginResourcePath: "PluginImages.svg.prox_aoe.svg" },
+        BossImage: { label: "Boss", imageResourcePath: "./icons/boss.svg", pluginResourcePath: "PluginImages.svg.boss.svg" },
+        Dot1Image: { label: "Dot 1", imageResourcePath: "./icons/1dot.svg", pluginResourcePath: "PluginImages.svg.1dot.svg" },
+        Dot2Image: { label: "Dot 2", imageResourcePath: "./icons/2dot.svg", pluginResourcePath: "PluginImages.svg.2dot.svg" },
+        Dot3Image: { label: "Dot 3", imageResourcePath: "./icons/3dot.svg", pluginResourcePath: "PluginImages.svg.3dot.svg" },
+        Dot4Image: { label: "Dot 4", imageResourcePath: "./icons/4dot.svg", pluginResourcePath: "PluginImages.svg.4dot.svg" },
+        Dot5Image: { label: "Dot 5", imageResourcePath: "./icons/5dot.svg", pluginResourcePath: "PluginImages.svg.5dot.svg" },
+        Dot6Image: { label: "Dot 6", imageResourcePath: "./icons/6dot.svg", pluginResourcePath: "PluginImages.svg.6dot.svg" },
+        Dot7Image: { label: "Dot 7", imageResourcePath: "./icons/7dot.svg", pluginResourcePath: "PluginImages.svg.7dot.svg" },
+        Dot8Image: { label: "Dot 8", imageResourcePath: "./icons/8dot.svg", pluginResourcePath: "PluginImages.svg.8dot.svg" },
     };
 
-    // This defines the structure and layout of the entire toolbar.
     const toolDefinitions = [
-        { type: 'grid', modes: ['select', 'eraser'] },
-        { type: 'grid', modes: ['copy', 'paste'] },
-        { type: 'full-button', mode: 'undo' },
-        { type: 'full-button', mode: 'clearAll' },
-        { type: 'full-button', mode: 'emoji' },
-        { type: 'full-button', mode: 'setbg' },
+        { type: 'grid', modes: ['Select', 'Eraser'] },
+        { type: 'grid', modes: ['Copy', 'Paste'] },
+        { type: 'full-button', mode: 'Undo' },
+        { type: 'full-button', mode: 'ClearAll' },
+        { type: 'full-button', mode: 'Emoji' },
+        { type: 'full-button', mode: 'SetBG' },
         { type: 'separator' },
         {
             type: 'main-grid', groups: [
-                { primary: 'pen', subModes: ['pen', 'line', 'dash'], tooltip: "Drawing Tools" },
-                { primary: 'rectangle', subModes: ['rectangle', 'circle', 'arrow', 'cone', 'triangle'], tooltip: "Shape Tools" },
-                { primary: 'squareImage', subModes: ['squareImage', 'circleMarkImage', 'triangleImage', 'plusImage'], tooltip: "Placeable Shapes" },
-                { primary: 'tankImage', subModes: ['tankImage', 'healerImage', 'meleeImage', 'rangedImage'], tooltip: "Role Icons" },
-                { primary: 'party1Image', subModes: ['party1Image', 'party2Image', 'party3Image', 'party4Image', 'party5Image', 'party6Image', 'party7Image', 'party8Image'], tooltip: "Party Number Icons" },
-                { primary: 'waymarkAImage', subModes: ['waymarkAImage', 'waymarkBImage', 'waymarkCImage', 'waymarkDImage'], tooltip: "Waymarks A-D" },
-                { primary: 'waymark1Image', subModes: ['waymark1Image', 'waymark2Image', 'waymark3Image', 'waymark4Image'], tooltip: "Waymarks 1-4" },
-                { primary: 'stackImage', subModes: ['stackImage', 'spreadImage', 'lineStackImage', 'flareImage', 'donutAoEImage', 'circleAoEImage', 'bossImage'], tooltip: "Mechanic Icons" },
-                { primary: 'text', subModes: [], tooltip: "Text Tool" },
-                { primary: 'dot3Image', subModes: ['dot1Image', 'dot2Image', 'dot3Image', 'dot4Image', 'dot5Image', 'dot6Image', 'dot7Image', 'dot8Image'], tooltip: "Colored Dots" },
+                { primary: 'Pen', subModes: ['Pen', 'StraightLine', 'Dash'], tooltip: "Drawing Tools" },
+                { primary: 'Rectangle', subModes: ['Rectangle', 'Circle', 'Arrow', 'Cone', 'Triangle'], tooltip: "Shape Tools" },
+                { primary: 'SquareImage', subModes: ['SquareImage', 'CircleMarkImage', 'TriangleImage', 'PlusImage'], tooltip: "Placeable Shapes" },
+                { primary: 'RoleTankImage', subModes: ['RoleTankImage', 'RoleHealerImage', 'RoleMeleeImage', 'RoleRangedImage'], tooltip: "Role Icons" },
+                { primary: 'Party1Image', subModes: ['Party1Image', 'Party2Image', 'Party3Image', 'Party4Image', 'Party5Image', 'Party6Image', 'Party7Image', 'Party8Image'], tooltip: "Party Number Icons" },
+                { primary: 'WaymarkAImage', subModes: ['WaymarkAImage', 'WaymarkBImage', 'WaymarkCImage', 'WaymarkDImage'], tooltip: "Waymarks A-D" },
+                { primary: 'Waymark1Image', subModes: ['Waymark1Image', 'Waymark2Image', 'Waymark3Image', 'Waymark4Image'], tooltip: "Waymarks 1-4" },
+                { primary: 'StackImage', subModes: ['StackImage', 'SpreadImage', 'LineStackImage', 'FlareImage', 'DonutAoEImage', 'CircleAoEImage', 'BossImage'], tooltip: "Mechanic Icons" },
+                { primary: 'TextTool', subModes: [], tooltip: "Text Tool" },
+                { primary: 'Dot3Image', subModes: ['Dot1Image', 'Dot2Image', 'Dot3Image', 'Dot4Image', 'Dot5Image', 'Dot6Image', 'Dot7Image', 'Dot8Image'], tooltip: "Colored Dots" },
             ]
         },
         { type: 'separator' },
@@ -99,6 +96,7 @@ const UIManager = (function () {
     let callbacks = {};
     let activeSubModeMap = {};
     let currentOpenGroup = null;
+    let pluginPathToWebPath = {};
 
     function createToolbar() {
         const container = document.getElementById('toolbar');
@@ -119,7 +117,10 @@ const UIManager = (function () {
                     btn.textContent = detail.label;
                     btn.id = `tool-${mode}`;
                     btn.title = detail.label;
-                    btn.onclick = () => callbacks.onToolSelect(mode);
+                    btn.onclick = () => {
+                        console.log(`[ui.js] Grid button clicked. Mode: ${mode}`);
+                        callbacks.onToolSelect(mode);
+                    }
                     gridContainer.appendChild(btn);
                 });
             } else if (def.type === 'full-button') {
@@ -133,11 +134,14 @@ const UIManager = (function () {
                 btn.id = `tool-${def.mode}`;
                 btn.className = 'full-width-btn';
                 btn.title = detail.label;
-                const cbName = `on${def.mode.charAt(0).toUpperCase() + def.mode.slice(1)}`;
+                const cbName = `on${def.mode}`;
                 if (callbacks[cbName]) {
                     btn.onclick = () => callbacks[cbName]();
                 } else {
-                    btn.onclick = () => callbacks.onToolSelect(def.mode);
+                    btn.onclick = () => {
+                        console.log(`[ui.js] Full-width button clicked. Mode: ${def.mode}`);
+                        callbacks.onToolSelect(def.mode);
+                    };
                 }
                 container.appendChild(btn);
             } else if (def.type === 'main-grid') {
@@ -152,8 +156,8 @@ const UIManager = (function () {
                     btn.title = group.tooltip;
                     const activeModeInGroup = activeSubModeMap[group.primary] || group.primary;
                     const detail = modeDetails[activeModeInGroup];
-                    if (detail && detail.icon) {
-                        btn.innerHTML = `<img src="${detail.icon}" alt="${detail.label || ''}"><span>${detail.label || ''}</span>`;
+                    if (detail && detail.imageResourcePath) {
+                        btn.innerHTML = `<img src="${detail.imageResourcePath}" alt="${detail.label || ''}"><span>${detail.label || ''}</span>`;
                     } else if (detail) {
                         btn.innerHTML = `<span>${detail.label}</span>`;
                     }
@@ -229,12 +233,13 @@ const UIManager = (function () {
             const btn = document.createElement('button');
             btn.id = `tool-option-${mode}`;
             const detail = modeDetails[mode];
-            if (detail && detail.icon) {
-                btn.innerHTML = `<img src="${detail.icon}" alt="${detail.label || ''}"><span>${detail.label || mode}</span>`;
+            if (detail && detail.imageResourcePath) {
+                btn.innerHTML = `<img src="${detail.imageResourcePath}" alt="${detail.label || ''}"><span>${detail.label || mode}</span>`;
             } else if (detail) {
                 btn.innerHTML = `<span>${detail.label}</span>`;
             }
             btn.onclick = () => {
+                console.log(`[ui.js] Sub-mode button clicked. Mode: ${mode}`);
                 callbacks.onToolSelect(mode);
                 activeSubModeMap[groupDef.primary] = mode;
                 container.style.display = 'none';
@@ -268,6 +273,12 @@ const UIManager = (function () {
             callbacks = appCallbacks;
             toolDefinitions.filter(d => d.type === 'main-grid').flatMap(d => d.groups).forEach(g => {
                 activeSubModeMap[g.primary] = g.primary;
+            });
+            Object.keys(modeDetails).forEach(key => {
+                const detail = modeDetails[key];
+                if (detail.pluginResourcePath && detail.imageResourcePath) {
+                    pluginPathToWebPath[detail.pluginResourcePath] = detail.imageResourcePath;
+                }
             });
             createToolbar();
             document.getElementById('add-page-btn').addEventListener('click', callbacks.onAddPage);
@@ -336,9 +347,8 @@ const UIManager = (function () {
         getModeDetailsByToolName: function (toolName) {
             return modeDetails[toolName] || null;
         },
-        // NEW: Expose all mode details for the deserializer
-        getAllModeDetails: function () {
-            return modeDetails;
+        getWebPathFromPluginPath: function (pluginPath) {
+            return pluginPathToWebPath[pluginPath] || pluginPath;
         }
     };
 })();
