@@ -29,10 +29,10 @@ document.addEventListener('DOMContentLoaded', () => {
         waymarkBImage: 'PluginImages.toolbar.B.png',
         waymarkCImage: 'PluginImages.toolbar.C.png',
         waymarkDImage: 'PluginImages.toolbar.D.png',
-        tankImage: 'PluginImages.toolbar.Tank.JPG',
+        tankImage: 'PluginImages.toolbar.Tank.jpg',
         healerImage: 'PluginImages.toolbar.Healer.JPG',
         meleeImage: 'PluginImages.toolbar.Melee.JPG',
-        rangedImage: 'PluginImages.toolbar.Ranged.JPG',
+        rangedImage: 'PluginImages.toolbar.Ranged.jpg',
         party1Image: 'PluginImages.toolbar.Party1.png',
         party2Image: 'PluginImages.toolbar.Party2.png',
         party3Image: 'PluginImages.toolbar.Party3.png',
@@ -390,4 +390,5 @@ document.addEventListener('DOMContentLoaded', () => {
     inPlaceTextEditor.initialize(undoManager, pageManager, { ...interactionHandlerCallbacks, onUpdateObject: interactionHandlerCallbacks.onObjectsModified });
 
     uiCallbacks.onPageSwitch(0);
+
 });
