@@ -30,8 +30,8 @@ document.addEventListener('DOMContentLoaded', () => {
         waymarkCImage: 'PluginImages.toolbar.C.png',
         waymarkDImage: 'PluginImages.toolbar.D.png',
         tankImage: 'PluginImages.toolbar.Tank.jpg',
-        healerImage: 'PluginImages.toolbar.Healer.JPG',
-        meleeImage: 'PluginImages.toolbar.Melee.JPG',
+        healerImage: 'PluginImages.toolbar.Healer.jpg',
+        meleeImage: 'PluginImages.toolbar.Melee.jpg',
         rangedImage: 'PluginImages.toolbar.Ranged.jpg',
         party1Image: 'PluginImages.toolbar.Party1.png',
         party2Image: 'PluginImages.toolbar.Party2.png',
@@ -392,3 +392,4 @@ document.addEventListener('DOMContentLoaded', () => {
     uiCallbacks.onPageSwitch(0);
 
 });
+
