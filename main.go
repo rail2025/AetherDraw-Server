@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -15,8 +18,11 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"golang.org/x/time/rate"
 )
+
+var db *sql.DB
 
 // Constants for WebSocket and Hub configuration.
 const (
@@ -235,26 +241,6 @@ func newHub() *Hub {
 	}
 }
 
-// sendHistory sends the room's message history to a new client in the background.
-// It runs in a separate goroutine to avoid blocking the main hub loop.
-func (h *Hub) sendHistory(client *Client, history [][]byte) {
-	// Recover from panics that can occur if a client disconnects mid-transfer
-	// and the send channel is closed. This prevents the entire server from crashing.
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Warn("History send failed: client disconnected.", "room", client.room)
-		}
-	}()
-
-	slog.Info("Starting history send in background.", "room", client.room, "messages", len(history))
-	// Loop through the history and send each message. This is a blocking send.
-	// It will wait if the client's send buffer is full, providing natural backpressure.
-	for _, msg := range history {
-		client.send <- msg
-	}
-	slog.Info("Finished sending history in background.", "room", client.room)
-}
-
 // run starts the Hub's message processing loop.
 func (h *Hub) run() {
 	for {
@@ -293,17 +279,16 @@ func (h *Hub) run() {
 			}
 			h.roomsMux.Unlock()
 
-			// Asynchronously send the existing room history to the new client.
 			room.historyMux.RLock()
-			// Create a copy of the history to send, so we don't hold the lock for a long time.
-			historyCopy := make([][]byte, len(room.history))
-			copy(historyCopy, room.history)
-			room.historyMux.RUnlock()
-
-			// Start a new goroutine to prevent the hub from blocking while sending history.
-			if len(historyCopy) > 0 {
-				go h.sendHistory(client, historyCopy)
+			for _, msg := range room.history {
+				select {
+				case client.send <- msg:
+				default:
+					slog.Warn("Failed to send history message to client, send channel full", "room", client.room)
+				}
 			}
+			room.historyMux.RUnlock()
+			slog.Info("Client history sent", "room", client.room, "clients_in_room", len(room.clients))
 
 		case client := <-h.unregister:
 			h.roomsMux.Lock()
@@ -669,12 +654,99 @@ func loadAndTransformMobData() {
 	slog.Info("Successfully loaded and transformed mob database from GitHub", "entries", len(mobDatabase))
 }
 
+// Helper function to generate a short, secure, URL-friendly ID
+func generateShortID() (string, error) {
+	bytes := make([]byte, 8) // 8 bytes = 16 hex characters
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
+}
+
+// HTTP handler for saving a plan
+func handlePlanSave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+	planData, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Could not read plan data", http.StatusBadRequest)
+		return
+	}
+	uniqueID, err := generateShortID()
+	if err != nil {
+		slog.Error("Failed to generate short ID", "error", err)
+		http.Error(w, "Failed to save plan", http.StatusInternalServerError)
+		return
+	}
+	_, err = db.Exec("INSERT INTO plans (id, data) VALUES ($1, $2)", uniqueID, planData)
+	if err != nil {
+		slog.Error("Failed to insert plan into database", "error", err)
+		http.Error(w, "Failed to save plan", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"id": uniqueID})
+	slog.Info("Successfully saved plan", "id", uniqueID)
+}
+
+// HTTP handler for loading a plan
+func handlePlanLoad(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/plan/load/")
+	if id == "" {
+		http.Error(w, "Plan ID is required", http.StatusBadRequest)
+		return
+	}
+	var planData []byte
+	err := db.QueryRow("SELECT data FROM plans WHERE id = $1", id).Scan(&planData)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Plan not found", http.StatusNotFound)
+		} else {
+			slog.Error("Failed to load plan from database", "id", id, "error", err)
+			http.Error(w, "Failed to load plan", http.StatusInternalServerError)
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Write(planData)
+	slog.Info("Successfully loaded and sent plan", "id", id)
+}
 
 // main is the entry point for the application.
 func main() {
 	// Setup structured logging.
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
+
+	// Database Connection Logic
+	var err error
+	databaseUrl := os.Getenv("DATABASE_URL")
+	if databaseUrl == "" {
+		slog.Error("DATABASE_URL environment variable is not set")
+		os.Exit(1)
+	}
+	db, err = sql.Open("pgx", databaseUrl)
+	if err != nil {
+		slog.Error("Failed to connect to database", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+	if err := db.Ping(); err != nil {
+		slog.Error("Failed to ping database", "error", err)
+		os.Exit(1)
+	}
+	createTableSQL := `CREATE TABLE IF NOT EXISTS plans (
+		id TEXT PRIMARY KEY,
+		data BYTEA NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);`
+	if _, err := db.Exec(createTableSQL); err != nil {
+		slog.Error("Failed to create plans table", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("Successfully connected to the database and ensured table exists.")
 
 	// Load and process mob data.
 	loadAndTransformMobData()
@@ -741,6 +813,10 @@ func main() {
 	})
 	mux.HandleFunc("/beastiebuddy/search", rateLimitMiddleware(handleBeastieBuddySearch))
 	mux.HandleFunc("/stats", handleStats)
+
+	// Register the new handlers for saving and loading plans
+	mux.HandleFunc("/plan/save", handlePlanSave)
+	mux.HandleFunc("/plan/load/", handlePlanLoad) // The trailing slash is important here
 
 	server := &http.Server{
 		Addr:    ":" + port,
