@@ -508,6 +508,8 @@ func handleBeastieBuddySearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.Info("BeastieBuddy search", "query", query)
+	
 	var results []SearchableMobData
 	for _, mob := range mobDatabase {
 		if strings.Contains(strings.ToLower(mob.Name), strings.ToLower(query)) {
@@ -853,3 +855,4 @@ func main() {
 
 	slog.Info("Server gracefully stopped")
 }
+
