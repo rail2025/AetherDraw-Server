@@ -290,6 +290,19 @@ const UIManager = (function () {
             document.getElementById('connect-btn').addEventListener('click', callbacks.onConnect);
             document.getElementById('disconnect-btn').addEventListener('click', callbacks.onDisconnect);
             document.getElementById('generate-passphrase-btn').addEventListener('click', generatePassphrase);
+
+            const saveModal = document.getElementById('save-modal');
+            document.getElementById('save-btn').addEventListener('click', () => {
+                document.getElementById('save-status-text').textContent = ''; // Clear previous status
+                saveModal.style.display = 'flex';
+            });
+            document.getElementById('close-save-modal-btn').addEventListener('click', () => {
+                saveModal.style.display = 'none';
+            });
+            document.getElementById('save-share-link-btn').addEventListener('click', () => {
+                callbacks.onSavePlan(); 
+            });
+
         },
         updateToolbar: function (state) {
             document.querySelectorAll('#toolbar button').forEach(b => b.classList.remove('active'));
@@ -333,6 +346,11 @@ const UIManager = (function () {
             document.getElementById('disconnect-btn').style.display = isConnected ? 'block' : 'none';
         },
         hideLiveModal: function () {
+            // Explicitly remove focus from any active element (like the passphrase input)
+            // before hiding the modal to prevent selection errors.
+            if (document.activeElement) {
+                document.activeElement.blur();
+            }
             document.getElementById('live-session-modal').style.display = 'none';
         },
         updateConnectionStatus: function (status) {
@@ -346,6 +364,12 @@ const UIManager = (function () {
         },
         getModeDetailsByToolName: function (toolName) {
             return modeDetails[toolName] || null;
+        },
+        showSavingStatus: function(message) {
+            const statusText = document.getElementById('save-status-text');
+            if (statusText) {
+                statusText.textContent = message;
+            }
         },
         getWebPathFromPluginPath: function (pluginPath) {
             return pluginPathToWebPath[pluginPath] || pluginPath;

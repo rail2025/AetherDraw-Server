@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
 
     const appState = {
-        currentToolName: 'select',
+        currentToolName: 'Select',
         brushColor: '#FFFFFF',
         brushWidth: 4,
         isShapeFilled: false,
@@ -12,6 +12,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     
     const pendingEchoIds = new Set();
+
+    let initialStateReceived = false;
 
     const toolNameToPluginResourcePath = {
         bossImage: 'PluginImages.svg.boss.svg',
@@ -30,8 +32,8 @@ document.addEventListener('DOMContentLoaded', () => {
         waymarkCImage: 'PluginImages.toolbar.C.png',
         waymarkDImage: 'PluginImages.toolbar.D.png',
         tankImage: 'PluginImages.toolbar.Tank.jpg',
-        healerImage: 'PluginImages.toolbar.Healer.jpg',
-        meleeImage: 'PluginImages.toolbar.Melee.jpg',
+        healerImage: 'PluginImages.toolbar.Healer.JPG',
+        meleeImage: 'PluginImages.toolbar.Melee.JPG',
         rangedImage: 'PluginImages.toolbar.Ranged.jpg',
         party1Image: 'PluginImages.toolbar.Party1.png',
         party2Image: 'PluginImages.toolbar.Party2.png',
@@ -118,16 +120,36 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         },
         onAddPage: () => {
-            pageManager.addNewPage();
-            undoManager.clearHistory();
-            uiManager.renderPageTabs(pageManager.getAllPages(), pageManager.getCurrentPageIndex(), uiCallbacks.onPageSwitch);
-            controllerCallbacks.onStateChanged();
+            if (networkManager.isConnected) {
+                // In live mode, send a command to the server and wait for the echo.
+                const payload = {
+                    pageIndex: pageManager.getAllPages().length, // The new page will be at this index
+                    action: PayloadActionType.AddNewPage,
+                    data: null
+                };
+                networkManager.sendStateUpdateAsync(payload);
+            } else {
+                // In offline mode, add the page locally immediately.
+                pageManager.addNewPage();
+                undoManager.clearHistory();
+                uiManager.renderPageTabs(pageManager.getAllPages(), pageManager.getCurrentPageIndex(), uiCallbacks.onPageSwitch);
+                controllerCallbacks.onStateChanged();
+            }
         },
         onDeletePage: () => {
-            pageManager.deleteCurrentPage();
-            undoManager.clearHistory();
-            uiManager.renderPageTabs(pageManager.getAllPages(), pageManager.getCurrentPageIndex(), uiCallbacks.onPageSwitch);
-            controllerCallbacks.onStateChanged();
+                if (networkManager.isConnected) {
+                const payload = {
+                    pageIndex: pageManager.getCurrentPageIndex(),
+                    action: PayloadActionType.DeletePage,
+                    data: null
+                };
+                networkManager.sendStateUpdateAsync(payload);
+            } else {
+                pageManager.deleteCurrentPage();
+                undoManager.clearHistory();
+                uiManager.renderPageTabs(pageManager.getAllPages(), pageManager.getCurrentPageIndex(), uiCallbacks.onPageSwitch);
+                controllerCallbacks.onStateChanged();
+            }
         },
         onCopyPage: () => {
              pageManager.copyCurrentPageToClipboard();
@@ -140,11 +162,13 @@ document.addEventListener('DOMContentLoaded', () => {
                  const payload = {
                     pageIndex: pageManager.getCurrentPageIndex(),
                     action: PayloadActionType.ReplacePage,
-                    data: PlanSerializer.serializePageToBytes(pageManager.getCurrentPageDrawables())
+                    data: DrawableSerializer.serializePageToBytes(pageManager.getCurrentPageDrawables())
                 };
                 networkManager.sendStateUpdateAsync(payload);
             }
-            controllerCallbacks.onStateChanged();
+            setTimeout(() => {
+                controllerCallbacks.onStateChanged();
+            }, 0);
         },
         onPageSwitch: (index) => {
             pageManager.switchToPage(index);
@@ -163,6 +187,36 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         onDisconnect: () => networkManager.disconnectAsync(),
         isNetworkConnected: () => networkManager.isConnected,
+        onSavePlan: async () => {
+            try {
+                const allPages = pageManager.getAllPages();
+                const planData = PlanSerializer.serializePlanToBytes(allPages, "My Saved Plan");
+
+                uiManager.showSavingStatus("Saving...");
+                const response = await fetch('https://aetherdraw-server.onrender.com/plan/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/octet-stream' },
+                    body: planData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Server responded with status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                const planId = result.id;
+                
+                const newUrl = `${window.location.origin}${window.location.pathname}?plan=${planId}`;
+                window.history.pushState({ path: newUrl }, '', newUrl);
+                
+                navigator.clipboard.writeText(newUrl);
+                uiManager.showSavingStatus("Saved! Link copied to clipboard.");
+
+            } catch (error) {
+                console.error("Failed to save plan:", error);
+                uiManager.showSavingStatus("Error saving plan.");
+            }
+        },
     };
 
     const controllerCallbacks = {
@@ -197,9 +251,13 @@ document.addEventListener('DOMContentLoaded', () => {
             controllerCallbacks.onStateChanged();
         },
         onStateChanged: (isQuickUpdate = false, previewDrawable = null) => {
-            // By removing the setTimeout, we make the entire render process
-            // synchronous and predictable, which fixes the ghosting bug.
-            canvasManager.renderPage(pageManager.getCurrentPageDrawables(), isQuickUpdate, previewDrawable);
+            const currentDrawables = pageManager.getCurrentPageDrawables();
+
+            // Give the controller the fresh, up-to-date list of objects.
+            canvasController.setCurrentPageDrawables(currentDrawables);
+
+            // Now, render the page and selection with the correct data.
+            canvasManager.renderPage(currentDrawables, isQuickUpdate, previewDrawable);
             canvasManager.updateSelection(appState.selectedDrawables);
         },
         getToolDetails: (toolName) => uiManager.getModeDetailsByToolName(toolName),
@@ -208,17 +266,26 @@ document.addEventListener('DOMContentLoaded', () => {
         canvasManager.addTemporaryShape(shape);
         },
         onObjectDeleted: (deletedObjectIds) => {
+             // Get the current state *before* any changes are made.
             const drawables = pageManager.getCurrentPageDrawables();
+            // ALWAYS record this state to the undo stack.
             undoManager.recordAction(drawables, "Erase Object(s)");
 
-            const newDrawables = drawables.filter(d => !deletedObjectIds.includes(d.uniqueId));
-            pageManager.setCurrentPageDrawables(newDrawables);
-            canvasController.setCurrentPageDrawables(newDrawables);
-
             if (networkManager.isConnected) {
-                // TODO: Implement network call for deletion sync
+                // In a live session, just tell the server what to delete.
+                const payload = {
+                    pageIndex: pageManager.getCurrentPageIndex(),
+                    action: PayloadActionType.DeleteObjects,
+                    data: PlanSerializer.serializeGuids(deletedObjectIds)
+                };
+                networkManager.sendStateUpdateAsync(payload);
+                // The server's echo will handle the deletion and Undo history.
+            } else {
+                // If not connected, perform deletion and record Undo locally.
+                const newDrawables = drawables.filter(d => !deletedObjectIds.includes(d.uniqueId));
+                pageManager.setCurrentPageDrawables(newDrawables);
+                controllerCallbacks.onStateChanged();
             }
-            controllerCallbacks.onStateChanged();
         }
     };
     
@@ -231,6 +298,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
 
                 if (networkManager.isConnected) {
+                    console.log('SENDER: Committing object with ID:', modifiedDrawables[0].uniqueId);
                     const payload = {
                         pageIndex: pageManager.getCurrentPageIndex(),
                         action: PayloadActionType.UpdateObjects,
@@ -254,9 +322,12 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     networkManager.onConnected = () => {
-        pageManager.enterLiveMode();
+        pageManager.enterLiveMode(); // creates a default page with waymarks
         uiManager.updateConnectionStatus("Connected");
         uiManager.hideLiveModal();
+        // The client now simply shows its local default page and waits for the server's
+        // authoritative state, which will overwrite it if the room is not new.
+        // This removes all race conditions and guesswork.
         uiCallbacks.onPageSwitch(0);
     };
     networkManager.onDisconnected = () => {
@@ -266,13 +337,23 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     networkManager.onError = (err) => uiManager.updateConnectionStatus(`Error: ${err}`);
     networkManager.onStateUpdateReceived = (payload) => {
+        initialStateReceived = true;
         const allPages = pageManager.getAllPages();
         if (payload.pageIndex < 0) return;
 
-        while (allPages.length <= payload.pageIndex) {
-            pageManager.addNewPage(false);
+        if (payload.action === PayloadActionType.ReplacePage || payload.action === PayloadActionType.AddNewPage) {
+            while (allPages.length <= payload.pageIndex) {
+                pageManager.addNewPage(false);
+            }
         }
-        
+
+        // Abort if the page index is still invalid after attempting to add pages.
+        if (payload.pageIndex < 0 || payload.pageIndex >= allPages.length) {
+             console.warn(`Received state update for invalid page index: ${payload.PageIndex}`);
+             return;
+        }
+
+         // Re-define the targetPageDrawables variable so the switch statement can use it.
         const targetPageDrawables = allPages[payload.pageIndex].drawables;
 
         switch (payload.action) {
@@ -307,12 +388,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (filteredObjects.length > 0) {
                     filteredObjects.forEach(updatedObj => {
+                        console.log('RECEIVER: Received update for ID:', updatedObj.uniqueId);
+                        console.log('RECEIVER: Searching for match in these IDs:', targetPageDrawables.map(d => d.uniqueId));
                         const index = targetPageDrawables.findIndex(d => d.uniqueId === updatedObj.uniqueId);
                         if (index !== -1) {
                             targetPageDrawables[index] = updatedObj;
-                        } else {
-                            targetPageDrawables.push(updatedObj);
-                        }
+                        } 
                     });
                 } else {
                     return;
@@ -326,6 +407,15 @@ document.addEventListener('DOMContentLoaded', () => {
             
             case PayloadActionType.ReplacePage:
                 allPages[payload.pageIndex].drawables = DrawableSerializer.deserializePageFromBytes(payload.data);
+                break;
+            // handle page management commands from the server.
+            case PayloadActionType.AddNewPage:
+                // need to refresh the UI.
+                uiManager.renderPageTabs(allPages, pageManager.getCurrentPageIndex(), uiCallbacks.onPageSwitch);
+                break;
+            case PayloadActionType.DeletePage:
+                pageManager.deleteCurrentPage(); // handle the local deletion
+                uiManager.renderPageTabs(allPages, pageManager.getCurrentPageIndex(), uiCallbacks.onPageSwitch);
                 break;
         }
 
@@ -343,12 +433,13 @@ document.addEventListener('DOMContentLoaded', () => {
             // Determine if the click was on a shape or the empty background (the stage)
             const isShapeClick = e.target !== e.target.getStage();
 
-            if (appState.currentToolName === 'select') {
+            if (appState.currentToolName === 'Select') {
                 // If the select tool is active, perform selection/deselection.
                 if (isShapeClick) {
                     shapeInteractionHandler.handleDragInitiation(e);
                 } else {
-                    shapeInteractionHandler.handleBackgroundClick(e);
+                    console.log('[DEBUG] Background click detected. Starting marquee selection.');
+                    shapeInteractionHandler.startMarqueeSelection(e);
                 }
             } else {
                 // If ANY other tool (drawing, icon, etc.) is active,
@@ -365,11 +456,25 @@ document.addEventListener('DOMContentLoaded', () => {
             // from running and creating a ghost image during a drag.
             if (shapeInteractionHandler.isDragging()) {
                 shapeInteractionHandler.handleCustomDrag(e);
-            } else {
+            } else if (shapeInteractionHandler.isMarqueeSelecting()) {
+                console.log('[DEBUG] Mouse move during marquee selection.');
+                const stage = e.target.getStage();
+                if (stage) {
+                    const startPos = shapeInteractionHandler.getMarqueeStartPos();
+                    const endPos = stage.getPointerPosition();
+                    canvasManager.updateMarqueeVisual(startPos, endPos);
+                }
+            }
+            else {
                 canvasController.handleMouseMove(e);
             }
         },
         onCanvasMouseUp: (e) => {
+            if (shapeInteractionHandler.isMarqueeSelecting()) {
+                console.log('[DEBUG] Mouse up detected. Finalizing marquee selection.');
+                shapeInteractionHandler.finalizeMarqueeSelection(e);
+                canvasManager.hideMarqueeVisual();
+            }
             // Pass the mouseup event to BOTH controllers.
             canvasController.handleMouseUp(e);          // Finalizes a new drawing.
             shapeInteractionHandler.handleDragTermination(e); // Finalizes a drag.
@@ -388,8 +493,34 @@ document.addEventListener('DOMContentLoaded', () => {
     canvasController.initialize(appState, controllerCallbacks, pageManager.getCurrentPageDrawables(), uiCallbacks.onToolSelect);
     shapeInteractionHandler.initialize(undoManager, pageManager, appState, interactionHandlerCallbacks);
     inPlaceTextEditor.initialize(undoManager, pageManager, { ...interactionHandlerCallbacks, onUpdateObject: interactionHandlerCallbacks.onObjectsModified });
+    
+    const loadPlanFromUrl = async () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const planId = urlParams.get('plan');
 
-    uiCallbacks.onPageSwitch(0);
-
+        if (planId) {
+            try {
+                console.log(`[App] Found plan ID in URL, attempting to load: ${planId}`);
+                const response = await fetch(`https://aetherdraw-server.onrender.com/plan/load/${planId}`);
+                if (!response.ok) throw new Error(`Server responded with status: ${response.status}`);
+                    
+                const planDataBytes = await response.arrayBuffer();
+                const deserializedPlan = PlanSerializer.deserializePlanFromBytes(planDataBytes);
+                    
+                if (deserializedPlan && deserializedPlan.pages) {
+                    pageManager.loadPages(deserializedPlan.pages);
+                    uiCallbacks.onPageSwitch(0); // Render the first page of the loaded plan
+                    console.log("[App] Successfully loaded and rendered plan from URL.");
+                } else {
+                    throw new Error("Failed to deserialize plan data.");
+                }
+            } catch (error) {
+                console.error("Failed to load plan from URL:", error);
+                uiCallbacks.onPageSwitch(0); // Load default page on error
+            }
+        } else {
+            uiCallbacks.onPageSwitch(0); // Load default page if no plan ID is in the URL
+        }
+    };
+    loadPlanFromUrl();
 });
-

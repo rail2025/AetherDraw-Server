@@ -4,6 +4,7 @@ const CanvasManager = (function () {
     let mainLayer = null;
     let handleLayer = null;
     let transformer = null;
+    let marqueeRect = null;
     let eraserPreview = null;
     let triangleHandles = [];
     let currentlyHandledTriangleId = null;
@@ -209,6 +210,26 @@ const CanvasManager = (function () {
             case DrawMode.Pen:
                 shape = new Konva.Line({ ...attrs, points: drawable.points.flatMap(p => [p.x, p.y]), lineCap: 'round', lineJoin: 'round' });
                 break;
+            case DrawMode.StraightLine:
+                shape = new Konva.Line({
+                    ...attrs,
+                    points: [
+                        drawable.startPoint.x, drawable.startPoint.y,
+                        drawable.endPoint.x, drawable.endPoint.y
+                    ],
+                    lineCap: 'round',
+                    lineJoin: 'round'
+                });
+                break;
+            case DrawMode.Dash:
+                shape = new Konva.Line({
+                    ...attrs,
+                    points: drawable.points.flatMap(p => [p.x, p.y]),
+                    dash: [drawable.dashLength, drawable.gapLength], // <-- Konva does the hard work
+                    lineCap: 'round',
+                    lineJoin: 'round'
+                });
+                break;
             case DrawMode.Arrow:
                 const vertices = drawable.getTransformedVertices();
                 if (!vertices) return null;
@@ -348,10 +369,57 @@ const CanvasManager = (function () {
             handleLayer.batchDraw();
         },
         hideEraserPreview: function() {
-        if (eraserPreview) {
-            eraserPreview.hide();
+            if (eraserPreview) {
+                eraserPreview.hide();
+                handleLayer.batchDraw();
+            }
+        },
+        
+        updateMarqueeVisual: function(startPos, endPos) {
+            if (!marqueeRect) {
+                console.log('[DEBUG] Creating marquee visual.');
+                marqueeRect = new Konva.Rect({
+                    fill: 'rgba(0, 161, 255, 0.2)',
+                    stroke: 'rgb(0, 161, 255)',
+                    strokeWidth: 1,
+                    listening: false,
+                });
+                handleLayer.add(marqueeRect);
+            }
+
+            // Change color for crossing (right to left) selection
+            const isCrossing = endPos.x < startPos.x;
+            if (isCrossing) {
+                marqueeRect.stroke('rgb(100, 255, 120)'); // Green
+                marqueeRect.fill('rgba(100, 255, 120, 0.2)');
+            } else {
+                marqueeRect.stroke('rgb(0, 161, 255)'); // Blue
+                marqueeRect.fill('rgba(0, 161, 255, 0.2)');
+            }
+
+            const pos = {
+                x: Math.min(startPos.x, endPos.x),
+                y: Math.min(startPos.y, endPos.y),
+            };
+            const size = {
+                width: Math.abs(startPos.x - endPos.x),
+                height: Math.abs(startPos.y - endPos.y),
+            };
+
+            marqueeRect.position(pos);
+            marqueeRect.size(size);
             handleLayer.batchDraw();
+        },
+
+        hideMarqueeVisual: function() {
+            if (marqueeRect) {
+                console.log('[DEBUG] Hiding marquee visual.');
+                marqueeRect.destroy();
+                marqueeRect = null;
+                handleLayer.batchDraw();
+            }
         }
-        }
+
+
     };
 })();

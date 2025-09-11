@@ -47,6 +47,22 @@
         </div>
     </div>
 
+    </div>
+    </div>
+
+    <div id="save-modal" class="modal-backdrop" style="display: none;">
+        <div class="modal">
+            <h3>Save & Share</h3>
+            <p>This will save the current plan and generate a shareable link.</p>
+            <p id="save-status-text" class="status-text"></p>
+            <div class="modal-buttons">
+                <button id="save-share-link-btn">Save & Get Link</button>
+                <button id="close-save-modal-btn">Close</button>
+            </div>
+        </div>
+    </div>
+    
+
     <script src="https://unpkg.com/konva@9.3.6/konva.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
 
@@ -64,6 +80,7 @@
     <script src="drawinglogic/drawableText.js"></script>
     <script src="drawinglogic/drawableRectangle.js"></script>
     <script src="drawinglogic/drawablePath.js"></script>
+    <script src="drawinglogic/drawableDash.js"></script>
     <script src="drawinglogic/drawableCircle.js"></script>
     <script src="drawinglogic/drawableCone.js"></script>
     <script src="drawinglogic/drawableFactory.js"></script>
@@ -84,5 +101,4 @@
     <script src="canvas.js"></script>
     <script src="app.js"></script>
 </body>
-
 </html>
