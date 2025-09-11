@@ -9,4 +9,6 @@ const PayloadActionType = Object.freeze({
     UpdateObjects: 2,
     ClearPage: 3,
     ReplacePage: 4,
+    AddNewPage: 5,
+    DeletePage: 6,
 });
