@@ -4,13 +4,27 @@ const ShapeInteractionHandler = (function () {
     let appState = null;
     let callbacks = {};
 
-    // --- State for our custom drag-and-drop logic ---
+    let isMarqueeSelecting = false;
+    let marqueeStartPos = { x: 0, y: 0 };
+
+    function rectIntersects(r1, r2) {
+        return !(r2.x > r1.x + r1.width ||
+                 r2.x + r2.width < r1.x ||
+                 r2.y > r1.y + r1.height ||
+                 r2.y + r2.height < r1.y);
+    }
+
+    function rectContains(r1, r2) {
+        return (r2.x >= r1.x &&
+                r2.x + r2.width <= r1.x + r1.width &&
+                r2.y >= r1.y &&
+                r2.y + r2.height <= r1.y + r1.height);
+    }
+    
     let isDraggingObject = false;
     let dragStartMousePos = { x: 0, y: 0 };
-    // Stores the original state of drawables at the start of a drag
     let dragStartObjectStates = [];
-    // ---
-
+    
     let draggedVertexIndex = -1; // State for triangle reshaping
 
     function getDrawableFromKonvaNode(konvaNode) {
@@ -24,15 +38,85 @@ const ShapeInteractionHandler = (function () {
         isDragging: function () {
             return isDraggingObject;
         },
+        isMarqueeSelecting: function() {
+            return isMarqueeSelecting;
+        },
         isObjectBeingDragged: function (uniqueId) {
             return isDraggingObject && dragStartObjectStates.some(s => s.uniqueId === uniqueId);
         },
-
+        getMarqueeStartPos: function() {
+             return marqueeStartPos;
+        },
         initialize: function (um, pm, state, cbs) {
             undoManager = um;
             pageManager = pm;
             appState = state;
             callbacks = cbs;
+        },
+        
+        startMarqueeSelection: function(e) {
+            console.log('[DEBUG] Marquee selection started.');
+            const stage = e.target.getStage();
+            if (!stage) return;
+            isMarqueeSelecting = true;
+            marqueeStartPos = stage.getPointerPosition();
+            console.log('[DEBUG] Marquee start position:', marqueeStartPos);
+            
+            if (!e.evt.shiftKey) {
+                 callbacks.onSelectionChange([]);
+            }
+        },
+
+        finalizeMarqueeSelection: function (e) {
+            if (!isMarqueeSelecting) return;
+            console.log('[DEBUG] Marquee selection finalizing...');
+            
+            const stage = e.target.getStage();
+            if (!stage) return;
+            const endPos = stage.getPointerPosition();
+            console.log('[DEBUG] Marquee end position:', endPos);
+
+            const min = {
+                x: Math.min(marqueeStartPos.x, endPos.x),
+                y: Math.min(marqueeStartPos.y, endPos.y)
+            };
+            const max = {
+                x: Math.max(marqueeStartPos.x, endPos.x),
+                y: Math.max(marqueeStartPos.y, endPos.y)
+            };
+
+            const marqueeRect = {
+                x: min.x,
+                y: min.y,
+                width: max.x - min.x,
+                height: max.y - min.y
+            };
+            
+            const isCrossing = endPos.x < marqueeStartPos.x;
+            console.log(`[DEBUG] Marquee rect calculated:`, marqueeRect);
+            console.log(`[DEBUG] Is crossing selection: ${isCrossing}`);
+
+            const allDrawables = pageManager.getCurrentPageDrawables();
+            const newlySelected = [];
+
+            allDrawables.forEach(drawable => {
+                const bbox = drawable.getBoundingBox(); 
+                if (!bbox) return;
+
+                const shouldSelect = isCrossing ? rectIntersects(marqueeRect, bbox) : rectContains(marqueeRect, bbox);
+
+                if (shouldSelect) {
+                    newlySelected.push(drawable);
+                }
+            });
+
+            console.log(`[DEBUG] Found ${newlySelected.length} items inside marquee.`);
+            const currentSelection = e.evt.shiftKey ? appState.selectedDrawables : [];
+            const finalSelection = [...new Set([...currentSelection, ...newlySelected])];
+            callbacks.onSelectionChange(finalSelection);
+
+            isMarqueeSelecting = false;
+            console.log('[DEBUG] Marquee selection finished.');
         },
 
         handleBackgroundClick: function (e) {
@@ -97,45 +181,47 @@ const ShapeInteractionHandler = (function () {
                     const liveDrawable = appState.selectedDrawables.find(d => d.uniqueId === uniqueId);
                     if (!liveDrawable) return;
 
-                    // Create a new state object based on the original state plus the drag delta.
-                    // This avoids using the live object's current state in the calculation,
-                    // preventing the cumulative "warping" error.
-                    const newState = JSON.parse(JSON.stringify(originalState)); // Create a working copy
-
-                    if (newState.center) { // For Circles
-                        newState.center.x += delta.x;
-                        newState.center.y += delta.y;
+                    // Safely apply the calculated delta to the live object's properties
+                    // without overwriting the entire object.
+                    if (liveDrawable.center) { // For Circles
+                        liveDrawable.center.x = originalState.center.x + delta.x;
+                        liveDrawable.center.y = originalState.center.y + delta.y;
                     }
-                    if (newState.position) { // For Images
-                        newState.position.x += delta.x;
-                        newState.position.y += delta.y;
+                    if (liveDrawable.position) { // For Images
+                        liveDrawable.position.x = originalState.position.x + delta.x;
+                        liveDrawable.position.y = originalState.position.y + delta.y;
                     }
-                    if (newState.startPoint && newState.endPoint) { // For Rectangles, Arrows, etc.
-                        newState.startPoint.x += delta.x;
-                        newState.startPoint.y += delta.y;
-                        newState.endPoint.x += delta.x;
-                        newState.endPoint.y += delta.y;
+                    if (liveDrawable.startPoint && liveDrawable.endPoint) { // For Rectangles, Arrows, etc.
+                        liveDrawable.startPoint.x = originalState.startPoint.x + delta.x;
+                        liveDrawable.startPoint.y = originalState.startPoint.y + delta.y;
+                        liveDrawable.endPoint.x = originalState.endPoint.x + delta.x;
+                        liveDrawable.endPoint.y = originalState.endPoint.y + delta.y;
                     }
-                    if (newState.vertices) { // For Triangles
-                        newState.vertices.forEach(v => {
-                            v.x += delta.x;
-                            v.y += delta.y;
+                    if (liveDrawable.vertices) { // For Triangles
+                        liveDrawable.vertices.forEach((v, index) => {
+                            v.x = originalState.vertices[index].x + delta.x;
+                            v.y = originalState.vertices[index].y + delta.y;
                         });
                     }
-                    if (newState.points) { // For Pen strokes
-                        newState.points.forEach(p => {
-                            p.x += delta.x;
-                            p.y += delta.y;
+                    if (liveDrawable.points) { // For Pen strokes
+                        liveDrawable.points.forEach((p, index) => {
+                            p.x = originalState.points[index].x + delta.x;
+                            p.y = originalState.points[index].y + delta.y;
                         });
                     }
 
-                    // Apply the calculated new state to the live drawable.
-                    Object.assign(liveDrawable, newState);
                     modifiedDrawables.push(liveDrawable);
                 });
 
                 if (modifiedDrawables.length > 0) {
-                    callbacks.onObjectsUpdatedLive(modifiedDrawables);
+                    const positionUpdates = modifiedDrawables.map(drawable => ({
+                        uniqueId: drawable.uniqueId,
+                        position: drawable.position,
+                        center: drawable.center, // If it's a circle
+                    }));
+
+                    callbacks.onObjectsUpdatedLive(positionUpdates);
+                    //e.target.getStage().batchDraw();
                 }
             },
 
@@ -146,7 +232,9 @@ const ShapeInteractionHandler = (function () {
 
             if (dragStartObjectStates.length > 0) {
                 callbacks.onObjectsCommitted(appState.selectedDrawables);
-            }
+                // Ensure no duplicate object is left in the canvas
+                //callbacks.onObjectsUpdatedLive(appState.selectedDrawables);
+            }               
 
             isDraggingObject = false;
             dragStartObjectStates = [];
