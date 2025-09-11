@@ -12,8 +12,8 @@ const UndoManager = (function (config) {
                 undoStack.shift();
             }
 
-            // Create a deep clone of each drawable by calling its own .clone() method.
-            const stateToSave = currentDrawables.map(drawable => drawable.clone());
+            // Create a deep clone of each drawable by calling its own .clone() method and remove null objects
+            const stateToSave = currentDrawables.filter(d => d).map(drawable => drawable.clone());
 
             const action = {
                 state: stateToSave,

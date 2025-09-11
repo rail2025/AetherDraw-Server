@@ -57,6 +57,8 @@ const PageManager = (function () {
 
         enterLiveMode: function () {
             isLiveMode = true;
+            // create a default page with waymarks upon entering live mode
+            // until the server sends an update.
             livePages = [_createDefaultPage("1")];
             currentPageIndex = 0;
         },
@@ -119,17 +121,26 @@ const PageManager = (function () {
             const pages = _getPages();
             if (pages.length === 0 || currentPageIndex < 0 || currentPageIndex >= pages.length) return;
             const sourcePage = pages[currentPageIndex];
-            this.pageClipboard = JSON.parse(JSON.stringify(sourcePage));
+            pageClipboard = JSON.parse(JSON.stringify(sourcePage));
         },
 
         pastePageFromClipboard: function () {
             const pages = _getPages();
-            if (!this.pageClipboard || pages.length === 0 || currentPageIndex < 0 || currentPageIndex >= pages.length) return false;
-
+            if (!pageClipboard || pages.length === 0 || currentPageIndex < 0 || currentPageIndex >= pages.length) return false;
             const targetPage = pages[currentPageIndex];
-            const clonedDrawables = JSON.parse(JSON.stringify(this.pageClipboard.drawables));
-            targetPage.drawables = cloned.Drawables;
+            const plainDrawableObjects = JSON.parse(JSON.stringify(pageClipboard.drawables));
+            targetPage.drawables = plainDrawableObjects.map(state => DrawableFactory.createFromState(state));
             return true;
+        },
+        
+        createDefaultWaymarks: function() {
+            const pages = _getPages();
+            if (pages.length > 0 && currentPageIndex >= 0 && currentPageIndex < pages.length) {
+                // Get the default waymarks by calling the existing private function
+                const defaultPageWithWaymarks = _createDefaultPage(pages[currentPageIndex].name);
+                // Replace the drawables on the current (and blank) page
+                pages[currentPageIndex].drawables = defaultPageWithWaymarks.drawables;
+            }
         },
         
         findTopmostDrawableAt: function(point, threshold) {
@@ -154,6 +165,14 @@ const PageManager = (function () {
         loadPages: function (loadedPagesData) {
             const pages = _getPages();
             pages.length = 0;
+            // when loading a plan (or receiving a fullstate update), 
+            // the drawables are properly re-instantiated into
+            // their respective classes using the DrawableFactory.
+            loadedPagesData.forEach(page => {
+                if (page.drawables && Array.isArray(page.drawables)) {
+                    page.drawables = page.drawables.map(state => DrawableFactory.createFromState(state));
+                }
+            });
             pages.push(...loadedPagesData);
             currentPageIndex = 0;
             if (pages.length === 0) {

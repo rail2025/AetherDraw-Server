@@ -149,21 +149,24 @@ const CanvasController = (function () {
         handleMouseMove: function (e) {
             if (isDrawing && currentDrawingObject) {
                 const pointer = e.target.getStage().getPointerPosition();
-                if (typeof currentDrawingObject.updatePreview === 'function') {
+                
+                if (currentDrawingObject instanceof DrawablePath || currentDrawingObject instanceof DrawableDash) {
+                    currentDrawingObject.addPoint(pointer);
+                } 
+                else if (typeof currentDrawingObject.updatePreview === 'function') {
                     console.log('[PREVIEW LOG] Calling updatePreview...');
                     currentDrawingObject.updatePreview(pointer);
                     console.log('[PREVIEW LOG] Drawable updated after preview:', JSON.parse(JSON.stringify(currentDrawingObject)));
-                } else if (currentDrawingObject instanceof DrawablePath) {
-                    currentDrawingObject.addPoint(pointer);
                 }
+                
                 // Instead of drawing here, we rely on a render call from the main loop
                 // For now, we manually trigger a quick update.
                 console.log('[PREVIEW LOG] Calling onStateChanged for quick update.');
                 callbacks.onStateChanged(true, currentDrawingObject);
-                } else if (isErasing) {
+            } else if (isErasing) {
                 const pointer = e.target.getStage().getPointerPosition();
                 eraseAtPoint(pointer); // Continuously erase on drag
-                }
+            }
             
         },
 
