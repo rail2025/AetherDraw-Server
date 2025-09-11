@@ -16,6 +16,7 @@ class BufferHandler {
     }
 
     writeUint8(val) { this._ensureCapacity(1); this.dataView.setUint8(this.offset, val); this.offset += 1; }
+    writeUint16(val) { this._ensureCapacity(2); this.dataView.setUint16(this.offset, val, true); this.offset += 2; }
     writeInt32(val) { this._ensureCapacity(4); this.dataView.setInt32(this.offset, val, true); this.offset += 4; }
     writeFloat32(val) { this._ensureCapacity(4); this.dataView.setFloat32(this.offset, val, true); this.offset += 4; }
     writeBoolean(val) { this.writeUint8(val ? 1 : 0); }
@@ -53,6 +54,7 @@ class BufferHandler {
     }
     
     readUint8() { const v = this.dataView.getUint8(this.offset); this.offset += 1; return v; }
+    readUint16() { const v = this.dataView.getUint16(this.offset, true); this.offset += 2; return v; }
     readInt32() { const v = this.dataView.getInt32(this.offset, true); this.offset += 4; return v; }
     readFloat32() { const v = this.dataView.getFloat32(this.offset, true); this.offset += 4; return v; }
     readBoolean() { return this.readUint8() === 1; }
@@ -296,10 +298,16 @@ const DrawableSerializer = (function () {
         serializePageToBytes: function (drawables) {
             if (!drawables) throw new Error("drawables cannot be null.");
             const writer = new BufferHandler();
+            
+            // Filter out any null or undefined objects first.
+            const validDrawables = drawables.filter(d => d);
+
+            // use the filtered array for all subsequent operations.
             writer.writeInt32(SERIALIZATION_VERSION);
-            writer.writeInt32(drawables.length);
-            drawables.forEach(drawable => _serializeSingleDrawable(writer, drawable));
-            return writer.getBuffer();
+            writer.writeInt32(validDrawables.length); // Use the length of the VALID array
+            validDrawables.forEach(drawable => _serializeSingleDrawable(writer, drawable)); // Iterate over the VALID array
+            
+            return writer.getBuffer();;
         },
 
         deserializePageFromBytes: function (data) {

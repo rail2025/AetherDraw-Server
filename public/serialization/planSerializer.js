@@ -94,6 +94,47 @@ const PlanSerializer = (function () {
                 console.error("General deserialization error.", ex);
                 return null;
             }
+        },
+        // --- NEW FUNCTION TO SEND DELETE MESSAGES ---
+        serializeGuids: function(guids) {
+            const buffer = new ArrayBuffer(4 + guids.length * 16);
+            const view = new DataView(buffer);
+            
+            view.setInt32(0, guids.length, true); // true for little-endian
+
+            let offset = 4;
+            guids.forEach(guidStr => {
+                const hex = guidStr.replace(/-/g, '');
+                for (let i = 0; i < 16; i++) {
+                    view.setUint8(offset + i, parseInt(hex.substring(i * 2, i * 2 + 2), 16));
+                }
+                offset += 16;
+            });
+
+            return buffer;
+        },
+
+        // --- NEW FUNCTION TO READ DELETE MESSAGES ---
+        deserializeGuids: function(dataBytes) {
+            const guids = [];
+            if (!dataBytes || dataBytes.byteLength < 4) return guids;
+
+            const reader = new BufferHandler(dataBytes);
+            const count = reader.readInt32();
+
+            if (count < 0 || count > 10000) {
+                console.error(`Invalid GUID count in delete payload: ${count}`);
+                return guids;
+            }
+
+            for (let i = 0; i < count; i++) {
+                const bytes = reader.readBytes(16);
+                let hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+                const uuid = `${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}`;
+                guids.push(uuid);
+            }
+
+            return guids;
         }
     });
 
