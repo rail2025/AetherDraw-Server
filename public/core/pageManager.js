@@ -18,22 +18,33 @@ const PageManager = (function () {
         const waymarkImageUnscaledSize = { width: 30, height: 30 };
 
         const waymarksToPreload = [
-            { mode: DrawMode.WaymarkAImage, path: "icons/A.png", angle: 3 * Math.PI / 2 },
-            { mode: DrawMode.WaymarkBImage, path: "icons/B.png", angle: 0 },
-            { mode: DrawMode.WaymarkCImage, path: "icons/C.png", angle: Math.PI / 2 },
-            { mode: DrawMode.WaymarkDImage, path: "icons/D.png", angle: Math.PI },
-            { mode: DrawMode.Waymark1Image, path: "icons/1_waymark.png", angle: 5 * Math.PI / 4 },
-            { mode: DrawMode.Waymark2Image, path: "icons/2_waymark.png", angle: 7 * Math.PI / 4 },
-            { mode: DrawMode.Waymark3Image, path: "icons/3_waymark.png", angle: Math.PI / 4 },
-            { mode: DrawMode.Waymark4Image, path: "icons/4_waymark.png", angle: 3 * Math.PI / 4 }
+            { toolName: 'WaymarkAImage', angle: 3 * Math.PI / 2 },
+            { toolName: 'WaymarkBImage', angle: 0 },
+            { toolName: 'WaymarkCImage', angle: Math.PI / 2 },
+            { toolName: 'WaymarkDImage', angle: Math.PI },
+            { toolName: 'Waymark1Image', angle: 5 * Math.PI / 4 },
+            { toolName: 'Waymark2Image', angle: 7 * Math.PI / 4 },
+            { toolName: 'Waymark3Image', angle: Math.PI / 4 },
+            { toolName: 'Waymark4Image', angle: 3 * Math.PI / 4 }
         ];
 
         const whiteTint = { r: 1, g: 1, b: 1, a: 1 };
 
         waymarksToPreload.forEach(wm => {
+            const details = UIManager.getModeDetailsByToolName(wm.toolName);
+            if (!details || !details.pluginResourcePath) return;
+
             const x = canvasCenter.x + waymarkPlacementRadius * Math.cos(wm.angle);
             const y = canvasCenter.y + waymarkPlacementRadius * Math.sin(wm.angle);
-            const drawableImage = new DrawableImage(wm.mode, wm.path, {x, y}, waymarkImageUnscaledSize, whiteTint, 0);
+
+            const drawableImage = new DrawableImage(
+                DrawMode[wm.toolName],
+                details.pluginResourcePath,
+                { x, y },
+                waymarkImageUnscaledSize,
+                whiteTint,
+                0
+            );
             newPage.drawables.push(drawableImage);
         });
         return newPage;
@@ -57,15 +68,28 @@ const PageManager = (function () {
 
         enterLiveMode: function () {
             isLiveMode = true;
-            // create a default page with waymarks upon entering live mode
-            // until the server sends an update.
-            livePages = [_createDefaultPage("1")];
+            livePages.length = 0;
+            livePages.push(_createDefaultPage("1"));
             currentPageIndex = 0;
+            console.log("[PageManager] Entered live mode. Created initial live page with default layout.");
         },
 
         exitLiveMode: function () {
             isLiveMode = false;
             currentPageIndex = 0;
+        },
+        
+        // NEW: Function to be called by the host client to seed the session.
+        createDefaultWaymarks: function() {
+            const pages = _getPages();
+            if (pages.length > 0 && currentPageIndex >= 0 && currentPageIndex < pages.length) {
+                const currentPage = pages[currentPageIndex];
+                const defaultPageWithWaymarks = _createDefaultPage(currentPage.name);
+                
+                // Mutate the array to populate the blank page.
+                currentPage.drawables.length = 0;
+                currentPage.drawables.push(...defaultPageWithWaymarks.drawables);
+            }
         },
 
         getAllPages: _getPages,
@@ -91,6 +115,41 @@ const PageManager = (function () {
                 pages.push(newPage);
                 currentPageIndex = 0;
             }
+        },
+        setBackgroundImage: function(backgroundImageDrawable) {
+            console.log("[PageManager] Setting new background image.", backgroundImageDrawable);
+            const drawables = this.getCurrentPageDrawables();
+            if (!drawables) return;
+
+            // Filter out any existing background image (identified by DrawMode.Image)
+            const drawablesWithoutBackground = drawables.filter(d => d.objectDrawMode !== DrawMode.Image);
+            console.log(`[PageManager] Removed ${drawables.length - drawablesWithoutBackground.length} existing background(s).`);
+
+            // Add the new background to the beginning of the array so it renders first (behind everything)
+            drawablesWithoutBackground.unshift(backgroundImageDrawable);
+            
+            this.setCurrentPageDrawables(drawablesWithoutBackground);
+            console.log("[PageManager] New drawable list with background:", this.getCurrentPageDrawables());
+        },
+        clearCurrentPageDrawables: function() {
+            const pages = _getPages();
+            if (pages.length > 0 && currentPageIndex >= 0 && currentPageIndex < pages.length) {
+                pages[currentPageIndex].drawables.length = 0; // .Clear() equivalent
+                if (pages.length === 1 && currentPageIndex === 0) {
+                    pages[currentPageIndex].name = "1";
+                }
+            }
+        },
+
+        findTopmostDrawableAt: function(point, threshold) {
+            const drawables = this.getCurrentPageDrawables();
+            // Iterate backwards to find the topmost object (last drawn)
+            for (let i = drawables.length - 1; i >= 0; i--) {
+                if (drawables[i].isHit(point, threshold)) {
+                    return drawables[i];
+                }
+            }
+            return null;
         },
 
         addNewPage: function (switchToPage = true) {
@@ -121,37 +180,28 @@ const PageManager = (function () {
             const pages = _getPages();
             if (pages.length === 0 || currentPageIndex < 0 || currentPageIndex >= pages.length) return;
             const sourcePage = pages[currentPageIndex];
-            pageClipboard = JSON.parse(JSON.stringify(sourcePage));
+
+            // Create a new clipboard object with proper clones.
+            pageClipboard = {
+                name: sourcePage.name,
+                drawables: sourcePage.drawables.map(d => d.clone())
+            };
         },
 
         pastePageFromClipboard: function () {
             const pages = _getPages();
             if (!pageClipboard || pages.length === 0 || currentPageIndex < 0 || currentPageIndex >= pages.length) return false;
+            
             const targetPage = pages[currentPageIndex];
-            const plainDrawableObjects = JSON.parse(JSON.stringify(pageClipboard.drawables));
-            targetPage.drawables = plainDrawableObjects.map(state => DrawableFactory.createFromState(state));
+            
+            // Clones are perfect copies. We clone them again on paste
+            // to ensure you can paste multiple times without issue.
+            const newDrawables = pageClipboard.drawables.map(d => d.clone());
+
+            // Replace the current page's content with the new clones.
+            targetPage.drawables = newDrawables;
+
             return true;
-        },
-        
-        createDefaultWaymarks: function() {
-            const pages = _getPages();
-            if (pages.length > 0 && currentPageIndex >= 0 && currentPageIndex < pages.length) {
-                // Get the default waymarks by calling the existing private function
-                const defaultPageWithWaymarks = _createDefaultPage(pages[currentPageIndex].name);
-                // Replace the drawables on the current (and blank) page
-                pages[currentPageIndex].drawables = defaultPageWithWaymarks.drawables;
-            }
-        },
-        
-        findTopmostDrawableAt: function(point, threshold) {
-            const drawables = this.getCurrentPageDrawables();
-            // Iterate backwards to find the topmost object (last drawn)
-            for (let i = drawables.length - 1; i >= 0; i--) {
-                if (drawables[i].isHit(point, threshold)) {
-                    return drawables[i];
-                }
-            }
-            return null;
         },
 
         switchToPage: function (newPageIndex, forceSwitch = false) {
@@ -165,9 +215,6 @@ const PageManager = (function () {
         loadPages: function (loadedPagesData) {
             const pages = _getPages();
             pages.length = 0;
-            // when loading a plan (or receiving a fullstate update), 
-            // the drawables are properly re-instantiated into
-            // their respective classes using the DrawableFactory.
             loadedPagesData.forEach(page => {
                 if (page.drawables && Array.isArray(page.drawables)) {
                     page.drawables = page.drawables.map(state => DrawableFactory.createFromState(state));

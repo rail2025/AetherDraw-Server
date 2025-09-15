@@ -138,9 +138,46 @@ const CanvasController = (function () {
                 currentDrawingObject = createNewDrawingObject(state.currentToolName, pointer, color, state.brushWidth, state.isShapeFilled);
                 console.log('[PREVIEW LOG] MouseDown created drawable:', currentDrawingObject);
                 // We no longer add a temporary Konva shape. The main render loop will handle the preview.
+            } else if (state.currentToolName === 'TextTool') {
+                const color = hexToRgbaObject(state.brushColor);
+                const newText = new DrawableText(pointer, "New Text", color, 16, 200);
+                callbacks.onObjectAdded(newText, true); // Add the object to the page immediately
+                // Find the Konva shape associated with this new text object to pass to the editor
+                const textNode = callbacks.findKonvaShape(newText.uniqueId);
+                if (textNode) {
+                    callbacks.onBeginTextEdit(newText, textNode);
+                }
+                onToolSelectCallback('Select');         // Switch back to the Select tool automatically
+            } else if (state.currentToolName === 'Emoji') {
+                const emojiChar = prompt("Please enter an emoji:");
+                if (emojiChar) {
+                    (async () => {
+                        try {
+                            //const dataUrl = await EmojiRenderer.renderEmojiToDataURL(emojiChar, 50); // size 50
+                            const newEmoji = new DrawableImage(
+                                DrawMode.EmojiImage,
+                                //dataUrl,
+                                `emoji:${emojiChar.trim()}`, //use emoji id format
+                                pointer,
+                                { width: 50, height: 50 }, // size 50
+                                { r: 1, g: 1, b: 1, a: 1 },
+                                0
+                            );
+                            callbacks.onObjectAdded(newEmoji, true);
+                            onToolSelectCallback('Select');
+                        } catch (error) {
+                            console.error("Failed to render emoji:", error);
+                            alert("Could not render the provided emoji. Please try a different one.");
+                        }
+                    })();
+                }
             } else if (toolDetails && toolDetails.imageResourcePath) {
                 console.log('[canvasController.js] Tool is an image. Attempting to place image.');
                 placeImage(pointer);
+            } else if (state.currentToolName === 'SetBG') {
+                console.log('[canvasController.js] SetBG tool clicked on canvas. Requesting background URL.');
+                callbacks.onRequestBackgroundUrl();
+                onToolSelectCallback('Select'); // Switch back to the select tool
             } else {
                 console.log(`[canvasController.js] Tool '${state.currentToolName}' not recognized as a shape or image tool. Doing nothing.`);
             }
