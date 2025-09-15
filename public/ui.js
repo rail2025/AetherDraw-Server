@@ -365,6 +365,29 @@ const UIManager = (function () {
         getModeDetailsByToolName: function (toolName) {
             return modeDetails[toolName] || null;
         },
+        showBackgroundUrlModal: function (importCallback) {
+            console.log("[UI] Showing background URL modal.");
+            const modal = document.getElementById('background-url-modal');
+            const importBtn = document.getElementById('import-background-btn');
+            const input = document.getElementById('background-url-input');
+            input.value = ''; // Clear previous input
+
+            // Store the callback to be used when "Import" is clicked.
+            importBtn.onclick = () => {
+                const url = input.value.trim();
+                if (url) {
+                    console.log(`[UI] Import button clicked with URL: ${url}`);
+                    importCallback(url);
+                    this.hideBackgroundUrlModal();
+                }
+            };
+            modal.style.display = 'flex';
+        },
+
+        hideBackgroundUrlModal: function () {
+            console.log("[UI] Hiding background URL modal.");
+            document.getElementById('background-url-modal').style.display = 'none';
+        },
         showSavingStatus: function(message) {
             const statusText = document.getElementById('save-status-text');
             if (statusText) {

@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AetherDraw Web</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="side-panel.css">
+    
+    <link rel="icon" type="image/png" href="icon.png">
 </head>
 <body>
     <div id="toolbar">
@@ -33,6 +36,26 @@
         </div>
     </div>
 
+<div id="editor-side-panel">
+        <h3>Text Properties</h3>
+        <div class="panel-section">
+            <label>Content</label>
+            <textarea id="side-panel-textarea"></textarea>
+        </div>
+        <div class="panel-section">
+            <label>Font Size</label>
+            <div class="font-size-controls">
+                <button data-size="12">S</button>
+                <button data-size="20">M</button>
+                <button data-size="32">L</button>
+                <button data-size="48">XL</button>
+            </div>
+        </div>
+        <button id="confirm-text-changes-btn">Confirm & Deselect</button>
+    </div>
+
+       <textarea id="inplace-text-overlay"></textarea>
+
     <div id="live-session-modal" class="modal-backdrop" style="display: none;">
         <div class="modal">
             <h3>Live Session</h3>
@@ -48,6 +71,18 @@
     </div>
 
     </div>
+    </div>
+    <div id="background-url-modal" class="modal-container" style="display:none;">
+        <div class="modal-content">
+            <span id="close-background-modal-btn" class="close-btn">&times;</span>
+            <h2>Import Background from URL</h2>
+            <p>Paste the direct URL of an image below.</p>
+            <input type="text" id="background-url-input" placeholder="e.g., https://i.imgur.com/image.png">
+            <div class="modal-buttons">
+                <button id="import-background-btn" class="button-primary">Import</button>
+                <button id="cancel-background-btn">Cancel</button>
+            </div>
+        </div>
     </div>
 
     <div id="save-modal" class="modal-backdrop" style="display: none;">
@@ -89,6 +124,7 @@
     <script src="serialization/payloadSerializer.js"></script>
     <script src="serialization/planSerializer.js"></script>
     
+    <script src="ui.js"></script>
     <script src="core/pageManager.js"></script>
     <script src="core/undoManager.js"></script>
     <script src="networking/networkManager.js"></script>
@@ -97,7 +133,7 @@
     <script src="core/canvasController.js"></script>
     <script src="drawinglogic/shapeInteractionHandler.js"></script>
     
-    <script src="ui.js"></script>
+    
     <script src="canvas.js"></script>
     <script src="app.js"></script>
 </body>

@@ -12,6 +12,9 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     
     const pendingEchoIds = new Set();
+    
+    //let clickTimeout = null;
+    //let lastClickedTarget = null;
 
     let initialStateReceived = false;
 
@@ -68,9 +71,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const uiCallbacks = {
         onToolSelect: (toolName) => {
-            console.log(`[app.js] onToolSelect received tool: '${toolName}'`);
+           if (inPlaceTextEditor.isEditing()) {
+                inPlaceTextEditor.endInPlaceEdit(true); // Commit changes if tool is switched
+            }
+            inPlaceTextEditor.hideSidePanel();
             appState.currentToolName = toolName;
-            console.log(`[app.js] appState.currentToolName is now: '${appState.currentToolName}'`);
             uiManager.updateToolbar(appState);
             canvasManager.updateSelection([]);
             appState.selectedDrawables = [];
@@ -79,6 +84,13 @@ document.addEventListener('DOMContentLoaded', () => {
         onColorChange: (color) => {
             appState.brushColor = color;
             uiManager.updateToolbar(appState);
+            // If text is selected, apply color change immediately
+            if (appState.selectedDrawables.length === 1 && appState.selectedDrawables[0] instanceof DrawableText) {
+                const textDrawable = appState.selectedDrawables[0];
+                textDrawable.color = hexToRgbaObject(color);
+                interactionHandlerCallbacks.onObjectsCommitted([textDrawable]); // Send update
+                inPlaceTextEditor.showSidePanel(textDrawable); // Refresh panel
+            }
         },
         onThicknessChange: (thickness) => {
             appState.brushWidth = parseFloat(thickness);
@@ -250,17 +262,55 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             controllerCallbacks.onStateChanged();
         },
+        onRequestBackgroundUrl: () => {
+            console.log("[App] Background URL request initiated. Showing modal.");
+            uiManager.showBackgroundUrlModal((url) => {
+                console.log(`[App] Received URL for background: ${url}`);
+                undoManager.recordAction(pageManager.getCurrentPageDrawables(), "Import Background");
+
+                // Get the current canvas size to make the background fit.
+                const stage = canvasManager.getStage();
+                const canvasSize = { width: stage.width(), height: stage.height() };
+                const canvasCenter = { x: canvasSize.width / 2, y: canvasSize.height / 2 };
+
+                const backgroundImage = new DrawableImage(
+                    DrawMode.Image,
+                    url,
+                    canvasCenter,
+                    canvasSize,
+                    { r: 1, g: 1, b: 1, a: 1 },
+                    0
+                );
+                
+                pageManager.setBackgroundImage(backgroundImage);
+
+                if (networkManager.isConnected) {
+                    console.log("[App] Live session active, sending ReplacePage payload for new background.");
+                    const payload = {
+                        pageIndex: pageManager.getCurrentPageIndex(),
+                        action: PayloadActionType.ReplacePage,
+                        data: DrawableSerializer.serializePageToBytes(pageManager.getCurrentPageDrawables())
+                    };
+                    networkManager.sendStateUpdateAsync(payload);
+                }
+
+                // Trigger a full re-render to show the new background.
+                controllerCallbacks.onStateChanged();
+            });
+        },
         onStateChanged: (isQuickUpdate = false, previewDrawable = null) => {
             const currentDrawables = pageManager.getCurrentPageDrawables();
-
-            // Give the controller the fresh, up-to-date list of objects.
             canvasController.setCurrentPageDrawables(currentDrawables);
-
-            // Now, render the page and selection with the correct data.
             canvasManager.renderPage(currentDrawables, isQuickUpdate, previewDrawable);
             canvasManager.updateSelection(appState.selectedDrawables);
         },
         getToolDetails: (toolName) => uiManager.getModeDetailsByToolName(toolName),
+        onBeginTextEdit: (drawable, konvaShape) => {
+            // This function is called to open the text editor UI
+            inPlaceTextEditor.beginInPlaceEdit(drawable, konvaShape, canvasManager.getStage());
+        },
+        findKonvaShape: (id) => {return canvasManager.findShapeById(id);
+        },
         onNewShapeDrawn: (shape) => {
         console.log("app.js: onNewShapeDrawn callback triggered.");
         canvasManager.addTemporaryShape(shape);
@@ -287,6 +337,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 controllerCallbacks.onStateChanged();
             }
         }
+        
     };
     
     const interactionHandlerCallbacks = {
@@ -316,7 +367,28 @@ document.addEventListener('DOMContentLoaded', () => {
             controllerCallbacks.onStateChanged(false); 
         },
         onSelectionChange: (newSelection) => {
+            if (inPlaceTextEditor.isEditing()) {
+                 inPlaceTextEditor.endInPlaceEdit(true); // Commit changes on deselection
+            }
             appState.selectedDrawables = newSelection;
+            // Show/hide side panel based on selection
+            if (newSelection.length === 1 && newSelection[0] instanceof DrawableText) {
+                inPlaceTextEditor.showSidePanel(newSelection[0]);
+            } else {
+                inPlaceTextEditor.hideSidePanel();
+            }
+           
+            // controllerCallbacks.onStateChanged(); // This causes a full re-render, which breaks the drag event stream.
+            // canvasManager.updateSelection(appState.selectedDrawables); // This still modifies the DOM synchronously, interrupting the event stream.
+            
+            // By deferring the selection update, we allow the mousedown event to complete before changing the DOM.
+            setTimeout(() => {
+                canvasManager.updateSelection(appState.selectedDrawables);
+            }, 0);
+        },
+        onDeselectAll: () => {
+            appState.selectedDrawables = [];
+            inPlaceTextEditor.hideSidePanel();
             controllerCallbacks.onStateChanged();
         }
     };
@@ -325,9 +397,20 @@ document.addEventListener('DOMContentLoaded', () => {
         pageManager.enterLiveMode(); // creates a default page with waymarks
         uiManager.updateConnectionStatus("Connected");
         uiManager.hideLiveModal();
-        // The client now simply shows its local default page and waits for the server's
-        // authoritative state, which will overwrite it if the room is not new.
-        // This removes all race conditions and guesswork.
+        // Send the new default page as a "candidate" for the initial room state,
+        // mimicking the C# client's behavior in MainWindow.cs.
+        setTimeout(() => {
+            const currentPageDrawables = pageManager.getCurrentPageDrawables();
+            if (currentPageDrawables && currentPageDrawables.length > 0) {
+                const payload = {
+                    pageIndex: pageManager.getCurrentPageIndex(),
+                    action: PayloadActionType.ReplacePage,
+                    data: DrawableSerializer.serializePageToBytes(currentPageDrawables)
+                };
+                networkManager.sendStateUpdateAsync(payload);
+            }
+        }, 100); // A small 100ms delay is sufficient.
+
         uiCallbacks.onPageSwitch(0);
     };
     networkManager.onDisconnected = () => {
@@ -378,9 +461,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 break;
             } 
 
-            case PayloadActionType.UpdateObjects: { 
+            case PayloadActionType.UpdateObjects: {
                 const updatedObjects = DrawableSerializer.deserializePageFromBytes(payload.data);
-                const filteredObjects = updatedObjects.filter(updatedObj => 
+                const filteredObjects = updatedObjects.filter(updatedObj =>
                     !pendingEchoIds.has(updatedObj.uniqueId)
                 );
                 if (filteredObjects.length < updatedObjects.length) {
@@ -393,14 +476,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         const index = targetPageDrawables.findIndex(d => d.uniqueId === updatedObj.uniqueId);
                         if (index !== -1) {
                             targetPageDrawables[index] = updatedObj;
-                        } 
+                        } else {
+                            // If the object doesn't exist, add it. This handles out-of-order messages.
+                            targetPageDrawables.push(updatedObj);
+                        }
                     });
                 } else {
                     return;
                 }
                 break;
-            } 
-
+            }
             case PayloadActionType.ClearPage:
                 targetPageDrawables.length = 0;
                 break;
@@ -427,37 +512,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const canvasCallbacks = {
         onCanvasMouseDown: (e) => {
-            console.log(`[app.js] Canvas mouse down detected. Current tool is: '${appState.currentToolName}'`);
             if (inPlaceTextEditor.isEditing()) return;
-            
-            // Determine if the click was on a shape or the empty background (the stage)
             const isShapeClick = e.target !== e.target.getStage();
 
             if (appState.currentToolName === 'Select') {
-                // If the select tool is active, perform selection/deselection.
                 if (isShapeClick) {
+                    // Call the new handler for preparing a drag.
                     shapeInteractionHandler.handleDragInitiation(e);
                 } else {
-                    console.log('[DEBUG] Background click detected. Starting marquee selection.');
                     shapeInteractionHandler.startMarqueeSelection(e);
                 }
             } else {
-                // If ANY other tool (drawing, icon, etc.) is active,
-                // let the canvasController handle it to create the new object.
                 canvasController.handleMouseDown(e);
             }
         },
         onCanvasMouseMove: (e) => {
-            // Pass the mousemove event to BOTH controllers.
-            // Each controller has internal checks to know if it should respond.
-            //canvasController.handleMouseMove(e);      // Handles drawing previews.
-            //shapeInteractionHandler.handleCustomDrag(e); // Handles dragging selected objects.
-            // By checking the state, we prevent the drawing controller
-            // from running and creating a ghost image during a drag.
-            if (shapeInteractionHandler.isDragging()) {
-                shapeInteractionHandler.handleCustomDrag(e);
-            } else if (shapeInteractionHandler.isMarqueeSelecting()) {
-                console.log('[DEBUG] Mouse move during marquee selection.');
+            // This now correctly handles the drag threshold logic.
+            shapeInteractionHandler.handleCustomDrag(e);
+            
+            if (shapeInteractionHandler.isMarqueeSelecting()) {
                 const stage = e.target.getStage();
                 if (stage) {
                     const startPos = shapeInteractionHandler.getMarqueeStartPos();
@@ -465,35 +538,48 @@ document.addEventListener('DOMContentLoaded', () => {
                     canvasManager.updateMarqueeVisual(startPos, endPos);
                 }
             }
-            else {
+            else if (!shapeInteractionHandler.isDragging()) { // Prevent drawing while dragging
                 canvasController.handleMouseMove(e);
             }
         },
         onCanvasMouseUp: (e) => {
             if (shapeInteractionHandler.isMarqueeSelecting()) {
-                console.log('[DEBUG] Mouse up detected. Finalizing marquee selection.');
                 shapeInteractionHandler.finalizeMarqueeSelection(e);
                 canvasManager.hideMarqueeVisual();
             }
-            // Pass the mouseup event to BOTH controllers.
-            canvasController.handleMouseUp(e);          // Finalizes a new drawing.
-            shapeInteractionHandler.handleDragTermination(e); // Finalizes a drag.
+            canvasController.handleMouseUp(e);
+            // This now correctly finalizes either a click or a drag.
+            shapeInteractionHandler.handleDragTermination(e);
+        },
+        onBeginTextEdit: controllerCallbacks.onBeginTextEdit,
+        onObjectCommitted: (drawables) => {
+            interactionHandlerCallbacks.onObjectsCommitted(drawables);
         }
     };
     
-    pageManager.initialize();
-    undoManager.clearHistory();
+    // Helper function for color changes
+    function hexToRgbaObject(hex) {
+        if (!hex || hex.length < 4) return { r: 1, g: 1, b: 1, a: 1 };
+        const r = parseInt(hex.slice(1, 3), 16) / 255;
+        const g = parseInt(hex.slice(3, 5), 16) / 255;
+        const b = parseInt(hex.slice(5, 7), 16) / 255;
+        return { r, g, b, a: 1.0 };
+    }
+
     uiManager.initialize(uiCallbacks);
-    TextureManager.initialize({
-        onLoad: () => {
-            controllerCallbacks.onStateChanged();
-        }
-    });
-    canvasManager.initialize(canvasCallbacks, shapeInteractionHandler);
+    undoManager.clearHistory();
+    pageManager.initialize();
+    
+    TextureManager.initialize({onLoad: () => {controllerCallbacks.onStateChanged();}});
+    canvasManager.initialize(canvasCallbacks);
     canvasController.initialize(appState, controllerCallbacks, pageManager.getCurrentPageDrawables(), uiCallbacks.onToolSelect);
     shapeInteractionHandler.initialize(undoManager, pageManager, appState, interactionHandlerCallbacks);
-    inPlaceTextEditor.initialize(undoManager, pageManager, { ...interactionHandlerCallbacks, onUpdateObject: interactionHandlerCallbacks.onObjectsModified });
-    
+    inPlaceTextEditor.initialize(undoManager, pageManager, {
+        onStateChanged: controllerCallbacks.onStateChanged,
+        onUpdateObject: (drawable) => interactionHandlerCallbacks.onObjectsCommitted([drawable]),
+        onDeselectAll: interactionHandlerCallbacks.onDeselectAll
+    });
+
     const loadPlanFromUrl = async () => {
         const urlParams = new URLSearchParams(window.location.search);
         const planId = urlParams.get('plan');
@@ -523,4 +609,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     loadPlanFromUrl();
+
+    //debug only remove for live:
+    window.controllerCallbacks = controllerCallbacks;
 });

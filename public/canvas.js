@@ -166,16 +166,90 @@ const CanvasManager = (function () {
             fill: drawable.isFilled ? color : null,
             stroke: !drawable.isFilled ? color : null,
         };
-        
-        if (drawable.objectDrawMode >= DrawMode.Image) { // Assumes all image modes have higher enum values
-            const imageObj = new Image();
-            imageObj.src = drawable.imageResourcePath;
+        if (drawable.objectDrawMode === DrawMode.TextTool) {
+                shape = new Konva.Text({
+                    ...attrs,
+                    x: drawable.position.x,
+                    y: drawable.position.y,
+                    text: drawable.text,
+                    fontSize: drawable.fontSize,
+                    fontFamily: 'Arial',
+                    fill: color, // Text uses fill for its color, not stroke
+                    stroke: null, // Ensure no outline by default
+                    strokeWidth: 0,
+                    width: drawable.wrappingWidth > 0 ? drawable.wrappingWidth : 'auto',
+                    //draggable: true, 
+                    
+                });
+                
+                shape.setAttr('drawable', drawable);
+
+                shape.on('dblclick dbltap', (e) => {
+                    console.log('[DEBUG] SHAPE dblclick fired!'); // LOG 4
+                });
+                
+                 shape.on('dblclick dbltap', (e) => {
+                    // Stop the event from bubbling up to prevent other actions.
+                    e.cancelBubble = true;
+                    
+                    const textDrawable = e.target.getAttr('drawable');
+                    if (textDrawable) {
+                        _callbacks.onBeginTextEdit(textDrawable, e.target);
+                    }
+                });
+                // Added a 'dragend' event to save position after moving
+                /*shape.on('dragend', (e) => {
+                    e.cancelBubble = true;
+                    const textDrawable = e.target.getAttr('drawable');
+                    if (textDrawable) {
+                        // Record the state before changing it for the undo history
+                        ShapeInteractionHandler.recordUndoStatePreDrag([textDrawable]);
+                        // Update the data object's position from the shape
+                        textDrawable.position = e.target.position();
+                        // Tell the app to commit this change
+                        _callbacks.onObjectCommitted([textDrawable]);
+                    }
+                });*/
+                
+        }
+        else if (drawable.objectDrawMode >= DrawMode.Image) { // Assumes all image modes have higher enum values
+            let imageElement; //= null; // Use a variable that both blocks can assign to.
+
+            //const imageObj = new Image();
+            //imageObj.src = drawable.imageResourcePath;
+
+            // Check for the special "emoji:" prefix to render it on the fly.
+            if (drawable.imageResourcePath.startsWith('emoji:')) {
+                const emoji = drawable.imageResourcePath.substring(6);
+                (async () => {
+                    try {
+                        imageElement.src = await EmojiRenderer.renderEmojiToDataURL(emoji, 128);
+                    } catch (error) {
+                        console.error("Failed to render emoji:", error);
+                        alert("Could not render the provided emoji. Please try a different one.");
+                    }
+                })();
+            /*} else {
+                // For all other images (like backgrounds), get them from the TextureManager.
+                imageElement = TextureManager.getTexture(drawable.imageResourcePath);
+            }*/
+            } else if (drawable.imageResourcePath.startsWith('http')) {
+                imageElement = TextureManager.getTexture(drawable.imageResourcePath);
+            } else {
+                imageElement = new Image();
+                imageElement.src = drawable.imageResourcePath;
+            }
+            // If the image isn't loaded yet (either emoji or background), draw nothing for now.
+            // A re-render will be triggered when it's ready.
+            if (!imageElement) {
+                return null;
+            }
 
             const konvaImage = new Konva.Image({
                 ...commonAttrs,
                 x: drawable.position.x,
                 y: drawable.position.y,
-                image: imageObj,
+                image: imageElement,
                 width: drawable.width,
                 height: drawable.height,
                 offsetX: drawable.width / 2,
@@ -183,11 +257,13 @@ const CanvasManager = (function () {
                 rotation: drawable.rotation,
             });
 
+            if (!drawable.imageResourcePath.startsWith('http')) {
+                imageElement.onload = function () {
             // Konva needs to redraw the layer once the image is loaded
-            imageObj.onload = function () {
+            //imageObj.onload = function () {
                 mainLayer.batchDraw();
             };
-            
+            }
             shape = konvaImage;
 
         } else {    
@@ -251,6 +327,7 @@ const CanvasManager = (function () {
                 shape = new Konva.Group({ ...commonAttrs });
                 shape.add(shaft, arrowhead);
                 break;
+            
             }
         }
         if (shape && !isPreview) {
@@ -286,7 +363,7 @@ const CanvasManager = (function () {
                 // The shapeInteractionHandler will update the data model.
                 ShapeInteractionHandler.handleTransformEnd(transformer.nodes());
             });
-
+            
             // Listener for deselecting by clicking the background
             stage.on('mousedown', (e) => callbacks.onCanvasMouseDown(e));
             stage.on('mousemove', (e) => callbacks.onCanvasMouseMove(e));
@@ -347,6 +424,11 @@ const CanvasManager = (function () {
                 _createArrowHandles(selectedDrawables[0]);
 
             } else if (selectedDrawables.length > 0) {
+                // If the selected item is text, do NOT attach the transformer.
+                // Its movement is handled by its 'draggable' property.
+                if (selectedDrawables.length === 1 && selectedDrawables[0] instanceof DrawableText) {
+                    transformer.nodes([]);
+                } else {
                 // NEW LOG
                 console.log('[Canvas.js] Handling generic selection. Searching for nodes...');
                 
@@ -362,6 +444,7 @@ const CanvasManager = (function () {
                 console.log(`[Canvas.js] Found ${selectedNodes.length} Konva nodes to attach transformer to.`);
 
                 transformer.nodes(selectedNodes);
+            }
             } else {
                  // NEW LOG
                 console.log('[Canvas.js] Selection is empty. Clearing transformer.');
@@ -418,6 +501,14 @@ const CanvasManager = (function () {
                 marqueeRect = null;
                 handleLayer.batchDraw();
             }
+        },
+        findShapeById: function(id) {
+            // Helper function to find a specific shape on the main layer by its unique ID.
+            return mainLayer.findOne('#' + id);
+        },
+        getStage: function() {
+            // Helper function to provide access to the main Konva stage object.
+            return stage;
         }
 
 
