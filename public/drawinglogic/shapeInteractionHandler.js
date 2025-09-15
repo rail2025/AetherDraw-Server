@@ -21,9 +21,12 @@ const ShapeInteractionHandler = (function () {
                 r2.y + r2.height <= r1.y + r1.height);
     }
     
-    let isDraggingObject = false;
+    let isMouseDownOnObject = false; // Is the mouse button currently down on a shape?
+    let isDraggingObject = false;    // Has the mouse moved enough to be considered a drag?
     let dragStartMousePos = { x: 0, y: 0 };
     let dragStartObjectStates = [];
+    const DRAG_THRESHOLD = 5; // The distance in pixels the mouse must move to start a drag
+    let originalMouseDownEvent = null; // Store the original mousedown event
     
     let draggedVertexIndex = -1; // State for triangle reshaping
 
@@ -127,7 +130,39 @@ const ShapeInteractionHandler = (function () {
         },
 
         handleDragInitiation: function (e) {
-            const hitObject = e.target;
+            console.log('[Drag Debug] handleDragInitiation started.');
+            // Get stage and pointer position immediately, before any re-renders can occur.
+            const stage = e.target.getStage();
+            if (!stage) return; // Safety check
+            dragStartMousePos = stage.getPointerPosition();
+            console.log(`[Drag Debug]   - Mouse down at: {x: ${dragStartMousePos.x}, y: ${dragStartMousePos.y}}`);
+
+            
+            isMouseDownOnObject = true; // Set the flag that a shape was clicked
+            console.log('[Drag Debug]   - isMouseDownOnObject set to true.');
+            const hitDrawable = getDrawableFromKonvaNode(e.target);
+            if (!hitDrawable) return;
+
+            const isSelected = appState.selectedDrawables.some(d => d.uniqueId === hitDrawable.uniqueId);
+            
+            if (e.evt.shiftKey) {
+                const newSelection = isSelected 
+                    ? appState.selectedDrawables.filter(d => d.uniqueId !== hitDrawable.uniqueId)
+                    : [...appState.selectedDrawables, hitDrawable];
+                callbacks.onSelectionChange(newSelection);
+            } else {
+                if (!isSelected) {
+                    callbacks.onSelectionChange([hitDrawable]);
+                }
+            }
+
+            // Prepare for a potential drag by caching the start positions.
+            //dragStartMousePos = e.target.getStage().getPointerPosition();
+            dragStartObjectStates = appState.selectedDrawables.map(drawable => ({
+                uniqueId: drawable.uniqueId,
+                originalState: JSON.parse(JSON.stringify(drawable))
+            }));
+            /*const hitObject = e.target;
             const stage = hitObject.getStage();
             if (!stage) return;
 
@@ -158,18 +193,36 @@ const ShapeInteractionHandler = (function () {
                     originalState: JSON.parse(JSON.stringify(drawable))
                 }));
 
-                undoManager.recordAction(pageManager.getCurrentPageDrawables(), "Move Object");
-            }
+                //undoManager.recordAction(pageManager.getCurrentPageDrawables(), "Move Object");
+            }*/
         },
 
         // Handles the visual movement during a drag.
         handleCustomDrag: function (e) {
-            if (!isDraggingObject) return;
+            if (!isMouseDownOnObject) return; // Only run if the mouse is down on an object.
+            console.log('[Drag Debug] handleCustomDrag running...');
 
             const stage = e.target.getStage();
             if (!stage) return;
-
             const currentMousePos = stage.getPointerPosition();
+            
+            // Check if the drag threshold has been passed to start the drag.
+            if (!isDraggingObject) {
+                const dx = currentMousePos.x - dragStartMousePos.x;
+                const dy = currentMousePos.y - dragStartMousePos.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                console.log(`[Drag Debug]   - Checking threshold. Distance: ${distance.toFixed(2)}, Threshold: ${DRAG_THRESHOLD}`);
+
+               if (distance > DRAG_THRESHOLD) {
+                    console.log('%c[Drag Debug]   - Drag threshold passed. Starting drag!', 'color: lightgreen; font-weight: bold;');
+                    isDraggingObject = true; // Threshold passed. We are now officially dragging.
+                    undoManager.recordAction(pageManager.getCurrentPageDrawables(), "Move Object");
+                }
+            }
+            
+            if (!isDraggingObject) return;
+            console.log('[Drag Debug]   - isDraggingObject is true. Applying movement.');
+
             const delta = {
                 x: currentMousePos.x - dragStartMousePos.x,
                 y: currentMousePos.y - dragStartMousePos.y
@@ -225,20 +278,20 @@ const ShapeInteractionHandler = (function () {
                 }
             },
 
-            // Finalizes the drag, updating the data model.
             handleDragTermination: function (e) {
-
-            if (!isDraggingObject) return;
-
-            if (dragStartObjectStates.length > 0) {
-                callbacks.onObjectsCommitted(appState.selectedDrawables);
-                // Ensure no duplicate object is left in the canvas
-                //callbacks.onObjectsUpdatedLive(appState.selectedDrawables);
-            }               
-
-            isDraggingObject = false;
-            dragStartObjectStates = [];
-        },
+                console.log('[Drag Debug] handleDragTermination started.');
+                if (isDraggingObject) {
+                    console.log('[Drag Debug]   - Was dragging. Committing changes.');
+                    callbacks.onObjectsCommitted(appState.selectedDrawables);
+                } else {
+                    console.log('[Drag Debug]   - Was NOT dragging (was a click). Nothing to commit.');
+                }
+                isMouseDownOnObject = false;
+                isDraggingObject = false;
+                dragStartObjectStates = [];
+                //originalMouseDownEvent = null;
+                console.log('[Drag Debug]   - All drag flags reset.');
+            },
 
         handleTriangleVertexDragStart: function (konvaHandle) {
             draggedVertexIndex = konvaHandle.getAttr('vertexIndex');

@@ -1,3 +1,4 @@
+const _layoutCanvasContext = document.createElement('canvas').getContext('2d');
 class DrawableText extends BaseDrawable {
     #rawText = "";
     #fontSize = 16;
@@ -49,14 +50,46 @@ class DrawableText extends BaseDrawable {
             this.boundingBoxSize = { x: 0, y: 0 };
             return;
         }
-        this.#konvaShapeForLayout.setAttrs({
-            text: this.#rawText,
-            fontSize: this.#fontSize,
-            width: this.#wrappingWidth > 0 ? this.#wrappingWidth : 'auto',
+        // Set font properties on the context to match Konva's rendering
+        // NOTE: You may need to adjust "sans-serif" if you use a different default font
+        _layoutCanvasContext.font = `${this.#fontSize}px Arial`;
+
+        const lines = this.#rawText.split('\n');
+        const laidOutLines = [];
+        let maxWidth = 0;
+        // Handle word wrapping if a wrappingWidth is set
+        if (this.#wrappingWidth > 0) {
+            lines.forEach(line => {
+                const words = line.split(' ');
+                let currentLine = '';
+                if (words.length > 0) {
+                    currentLine = words[0];
+                    for (let i = 1; i < words.length; i++) {
+                        const testLine = `${currentLine} ${words[i]}`;
+                        if (_layoutCanvasContext.measureText(testLine).width > this.#wrappingWidth) {
+                            laidOutLines.push(currentLine);
+                            currentLine = words[i];
+                        } else {
+                            currentLine = testLine;
+                        }
+                    }
+                }
+                laidOutLines.push(currentLine);
+            });
+        } else {
+            laidOutLines.push(...lines);
+        }
+        // Calculate the max width from the resulting lines
+        laidOutLines.forEach(line => {
+            maxWidth = Math.max(maxWidth, _layoutCanvasContext.measureText(line).width);
         });
+        // Approximate line height. Konva's default is around 1.2x font size.
+        const lineHeight = this.#fontSize * 1.2;
+        const totalHeight = laidOutLines.length > 0 ? laidOutLines.length * lineHeight : this.#fontSize;
+
         this.boundingBoxSize = {
-            x: this.#konvaShapeForLayout.width(),
-            y: this.#konvaShapeForLayout.height(),
+            x: maxWidth,
+            y: totalHeight,
         };
     }
 

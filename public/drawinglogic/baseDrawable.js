@@ -35,6 +35,7 @@ class BaseDrawable {
 
     copyBasePropertiesTo(target) {
         
+        target.uniqueId = this.uniqueId; 
         target.objectDrawMode = this.objectDrawMode;
         target.color = { ...this.color };
         target.thickness = this.thickness;

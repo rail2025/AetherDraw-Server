@@ -27,6 +27,7 @@ const TextureManager = (function () {
     function _loadFromSource(src) {
         return new Promise((resolve, reject) => {
             const img = new Image();
+            img.crossOrigin = 'Anonymous'; // request CORS permission for browser security
             img.onload = () => resolve(img);
             img.onerror = () => reject(new Error(`Failed to load image from source: ${src}`));
             img.src = src;
@@ -44,8 +45,14 @@ const TextureManager = (function () {
                 const emojiChar = resourcePath.substring("emoji:".length);
                 imageElement = await _generateAndLoadEmojiTexture(emojiChar);
             } else {
-                const url = resourcePath.startsWith("http") ? resourcePath : `./${resourcePath.replace(/\\/g, '/')}`;
-                imageElement = await _loadFromSource(url);
+                //const url = resourcePath.startsWith("http") ? resourcePath : `./${resourcePath.replace(/\\/g, '/')}`;
+                let finalUrl = resourcePath;
+                if (resourcePath.startsWith("http")) {
+                    // If it's an external URL, route it through your proxy.
+                    finalUrl = `https://aetherdraw-server.onrender.com/proxy-image?url=${encodeURIComponent(resourcePath)}`;
+                    console.log(`[TextureManager] Proxying external URL: ${finalUrl}`);
+                }
+                imageElement = await _loadFromSource(finalUrl);
             }
 
             loadedTextures.set(resourcePath, imageElement);
