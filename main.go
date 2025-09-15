@@ -318,24 +318,11 @@ func (h *Hub) run() {
 			h.roomsMux.RLock()
 			if room, ok := h.rooms[message.room]; ok {
 				room.historyMux.Lock()
-				if message.source.clientType == "ad" || message.source.clientType == "ad-web" {
-					// Check if this is the very first message for a new room.
-					if len(room.history) == 0 {
-						// The first message for a new room MUST be a ReplacePage action.
-						// The PayloadActionType is the 5th byte (index 4). ReplacePage is 4.
-						if len(message.data) > 5 && message.data[4] == 4 {
-							room.history = append(room.history, message.data)
-							slog.Info("Initial state set for room", "room", message.room)
-						} else {
-							// Ignore any other message type if the initial state is not set.
-							slog.Warn("Ignoring non-ReplacePage message for new room", "room", message.room)
-						}
-					} else {
-						// If history already exists, just add the new message.
-						room.history = append(room.history, message.data)
-						if len(room.history) > historyCap {
-							room.history = room.history[1:]
-						}
+				// Only store history for AetherDraw clients, not for AetherBreaker games.
+				if message.source.clientType != "ab" {
+					room.history = append(room.history, message.data)
+					if len(room.history) > historyCap {
+						room.history = room.history[1:]
 					}
 				}
 				room.historyMux.Unlock()
@@ -521,8 +508,6 @@ func handleBeastieBuddySearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("BeastieBuddy search", "query", query)
-	
 	var results []SearchableMobData
 	for _, mob := range mobDatabase {
 		if strings.Contains(strings.ToLower(mob.Name), strings.ToLower(query)) {
@@ -676,6 +661,53 @@ func generateShortID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(bytes), nil
+}
+
+// handleImageProxy securely fetches an image from an allowed external URL.
+func handleImageProxy(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Get the target URL from the query parameters.
+	targetURL := r.URL.Query().Get("url")
+	if targetURL == "" {
+		http.Error(w, "URL parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	// Step 2: Validate the URL to prevent abuse.
+	// This is a crucial security step. We only allow proxying from i.imgur.com.
+	if !strings.HasPrefix(targetURL, "https://i.imgur.com/") {
+		http.Error(w, "Provided URL is not from an allowed domain", http.StatusForbidden)
+		slog.Warn("Proxy request blocked for disallowed domain", "url", targetURL)
+		return
+	}
+
+	// Step 3: Fetch the image from the external server.
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("GET", targetURL, nil)
+	if err != nil {
+		http.Error(w, "Failed to create request", http.StatusInternalServerError)
+		return
+	}
+	// It's good practice to pass along the User-Agent.
+	req.Header.Set("User-Agent", r.UserAgent())
+
+	resp, err := client.Do(req)
+	if err != nil {
+		http.Error(w, "Failed to fetch image", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Warn("Proxy target returned non-200 status", "url", targetURL, "status", resp.StatusCode)
+		http.Error(w, "Failed to fetch image", resp.StatusCode)
+		return
+	}
+
+	// Step 4: Relay the image data and headers back to the original client.
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	w.Header().Set("Content-Length", resp.Header.Get("Content-Length"))
+	io.Copy(w, resp.Body)
+	slog.Info("Successfully proxied image", "url", targetURL)
 }
 
 // HTTP handler for saving a plan
@@ -832,6 +864,7 @@ func main() {
 	// Register the new handlers for saving and loading plans
 	mux.HandleFunc("/plan/save", handlePlanSave)
 	mux.HandleFunc("/plan/load/", handlePlanLoad) // The trailing slash is important here
+	mux.HandleFunc("/proxy-image", handleImageProxy)
 
 	server := &http.Server{
 		Addr:    ":" + port,
@@ -868,5 +901,3 @@ func main() {
 
 	slog.Info("Server gracefully stopped")
 }
-
-
