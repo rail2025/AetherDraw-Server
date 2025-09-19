@@ -56,7 +56,7 @@ const (
 )
 
 // warningMessage is the byte sequence sent to clients before the room is closed.
-var warningMessage = []byte{5}
+var warningMessage = []byte{1}
 
 // --- BeastieBuddy Data Structures ---
 
@@ -916,4 +916,5 @@ func main() {
 
 	slog.Info("Server gracefully stopped")
 }
+
 
