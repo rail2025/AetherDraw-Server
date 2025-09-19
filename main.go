@@ -673,8 +673,23 @@ func handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 2: Validate the URL to prevent abuse.
-	// This is a crucial security step. We only allow proxying from i.imgur.com.
-	if !strings.HasPrefix(targetURL, "https://i.imgur.com/") {
+	// This is a crucial security step. We only allow proxying from approved domains.
+	allowedDomains := []string{
+		"https://i.imgur.com/", 
+		"https://i.ibb.co/",
+		"https://live.staticflickr.com/",
+		"https://i.postimg.cc/",
+		"https://i.gyazo.com/",
+	}
+	isAllowed := false
+	for _, domain := range allowedDomains {
+		if strings.HasPrefix(targetURL, domain) {
+			isAllowed = true
+			break
+		}
+	}
+
+	if !isAllowed {
 		http.Error(w, "Provided URL is not from an allowed domain", http.StatusForbidden)
 		slog.Warn("Proxy request blocked for disallowed domain", "url", targetURL)
 		return
@@ -901,3 +916,4 @@ func main() {
 
 	slog.Info("Server gracefully stopped")
 }
+
