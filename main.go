@@ -501,7 +501,7 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 // --- BeastieBuddy Search Handler ---
 func handleBeastieBuddySearch(w http.ResponseWriter, r *http.Request) {
 	stats.BeastieBuddy.Add(1) // Increment counter
-
+	slog.Info("BeastieBuddy search", "query", query)
 	query := r.URL.Query().Get("query")
 	if query == "" {
 		http.Error(w, "Query parameter is required", http.StatusBadRequest)
@@ -916,5 +916,6 @@ func main() {
 
 	slog.Info("Server gracefully stopped")
 }
+
 
 
