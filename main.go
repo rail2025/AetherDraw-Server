@@ -315,44 +315,58 @@ func (h *Hub) run() {
 			h.roomsMux.Unlock()
 
 		case message := <-h.broadcast:
-			h.roomsMux.RLock()
-			if room, ok := h.rooms[message.room]; ok {
-				room.historyMux.Lock()
-				// Only store history for AetherDraw clients, not for AetherBreaker games.
-				if message.source.clientType != "ab" {
-					room.history = append(room.history, message.data)
-					if len(room.history) > historyCap {
-						room.history = room.history[1:]
-					}
-				}
-				room.historyMux.Unlock()
+		    h.roomsMux.RLock()
+ 		   if room, ok := h.rooms[message.room]; ok {
+ 		       room.historyMux.Lock()
+ 		       // If the client is an AetherDraw client, handle history with special logic.
+  		      if message.source.clientType == "ad" || message.source.clientType == "ad-web" {
+   		         // Check if this is the very first message for a new room.
+   		         if len(room.history) == 0 {
+   		             // The first message for a new room MUST be a ReplacePage action.
+        		        // The PayloadActionType is the 5th byte (index 4). ReplacePage is 4.
+                if len(message.data) > 5 && message.data[4] == 4 {
+                    room.history = append(room.history, message.data)
+                    slog.Info("Initial state set for room", "room", message.room)
+                } else {
+                    // Ignore any other message type if the initial state is not set.
+                    slog.Warn("Ignoring non-ReplacePage message for new room", "room", message.room)
+                }
+            } else {
+                // If history already exists, just add the new message.
+                room.history = append(room.history, message.data)
+                if len(room.history) > historyCap {
+                    room.history = room.history[1:]
+                }
+            }
+        }
+        room.historyMux.Unlock()
 
-				// If the message is from an "ab" client, send only to the other player.
-				if message.source.clientType == "ab" {
-					for client := range room.clients {
-						if client != message.source {
-							select {
-							case client.send <- message.data:
-							default:
-								close(client.send)
-								delete(room.clients, client)
-							}
-						}
-					}
-				} else {
-					// Otherwise (for "ad" clients), broadcast to everyone.
-					for client := range room.clients {
-						select {
-						case client.send <- message.data:
-						default:
-							close(client.send)
-							delete(room.clients, client)
-						}
-					}
-				}
-			}
-			h.roomsMux.RUnlock()
-
+        // If the message is from an "ab" client, send only to the other player.
+        if message.source.clientType == "ab" {
+            for client := range room.clients {
+                if client != message.source {
+                    select {
+                    case client.send <- message.data:
+                    default:
+                        close(client.send)
+                        delete(room.clients, client)
+                    }
+                }
+            }
+        } else {
+            // Otherwise (for "ad" and "ad-web" clients), broadcast to everyone.
+            for client := range room.clients {
+                select {
+                case client.send <- message.data:
+                default:
+                    close(client.send)
+                    delete(room.clients, client)
+                }
+            }
+        }
+    }
+    h.roomsMux.RUnlock()
+			
 		case roomName := <-h.cleanupRoom:
 			h.roomsMux.Lock()
 			if room, ok := h.rooms[roomName]; ok {
@@ -916,6 +930,7 @@ func main() {
 
 	slog.Info("Server gracefully stopped")
 }
+
 
 
 
