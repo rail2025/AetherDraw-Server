@@ -694,6 +694,7 @@ func handleImageProxy(w http.ResponseWriter, r *http.Request) {
 		"https://live.staticflickr.com/",
 		"https://i.postimg.cc/",
 		"https://i.gyazo.com/",
+		"https://cf.raidplan.io/",
 	}
 	isAllowed := false
 	for _, domain := range allowedDomains {
@@ -930,3 +931,4 @@ func main() {
 
 	slog.Info("Server gracefully stopped")
 }
+
